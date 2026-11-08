@@ -12,7 +12,9 @@ import UIKit
 struct diminaApp: App {
     var body: some Scene {
         WindowGroup {
+            // 根容器铺满整屏，避免状态栏与 Home Indicator 区域露出白色背景
             HostRootView()
+                .ignoresSafeArea()
         }
     }
 }
@@ -28,6 +30,7 @@ struct HostRootView: UIViewControllerRepresentable {
 
         let navigationController = UINavigationController(rootViewController: hostingController)
         navigationController.setNavigationBarHidden(true, animated: false)
+        navigationController.view.backgroundColor = UIColor(HostTheme.bg)
 
         ContentView.navigationController = navigationController
         return navigationController
