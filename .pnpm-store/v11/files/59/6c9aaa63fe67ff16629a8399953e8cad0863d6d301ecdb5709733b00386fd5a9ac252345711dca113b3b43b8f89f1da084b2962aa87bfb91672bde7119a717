@@ -1,0 +1,8 @@
+import { IBrotliCompressOptions, IBrotliDecompressOptions } from "./common.js";
+import { CompressStream, DecompressStream } from "./wasmRuntime.js";
+export { BrotliStreamResultCode } from "./wasmRuntime.js";
+export type { BrotliStreamResult } from "./wasmRuntime.js";
+export declare const compress: (input: Uint8Array, options?: IBrotliCompressOptions) => Promise<Uint8Array<ArrayBuffer>>;
+export declare const decompress: (input: Uint8Array, options?: IBrotliDecompressOptions) => Promise<Uint8Array>;
+export declare const createCompressStream: (options?: IBrotliCompressOptions) => Promise<CompressStream>;
+export declare const createDecompressStream: (options?: IBrotliDecompressOptions) => Promise<DecompressStream>;

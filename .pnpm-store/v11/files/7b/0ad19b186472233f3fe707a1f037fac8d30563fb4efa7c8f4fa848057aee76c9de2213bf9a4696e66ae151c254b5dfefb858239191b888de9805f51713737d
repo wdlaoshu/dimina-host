@@ -1,0 +1,118 @@
+/**
+ * Returned by every successful (de)compression.
+ */
+export declare class BrotliStreamResult {
+    __wbg_ptr: number;
+    static __wrap(ptr: any): any;
+    __destroy_into_raw(): number;
+    free(): void;
+    /**
+     * Output buffer
+     * @returns {Uint8Array}
+     */
+    get buf(): Uint8Array;
+    /**
+     * Result code.
+     *
+     * See [`BrotliStreamResultCode`] for available values.
+     *
+     * When error, the error code is not passed here but rather goes to `Err`.
+     * @returns {BrotliStreamResultCode}
+     */
+    get code(): BrotliStreamResultCode;
+    /**
+     * Consumed bytes of the input buffer
+     * @returns {number}
+     */
+    get input_offset(): number;
+    /**
+     * Output buffer
+     * @param {Uint8Array} arg0
+     */
+    set buf(arg0: Uint8Array);
+    /**
+     * Result code.
+     *
+     * See [`BrotliStreamResultCode`] for available values.
+     *
+     * When error, the error code is not passed here but rather goes to `Err`.
+     * @param {BrotliStreamResultCode} arg0
+     */
+    set code(arg0: BrotliStreamResultCode);
+    /**
+     * Consumed bytes of the input buffer
+     * @param {number} arg0
+     */
+    set input_offset(arg0: number);
+}
+/**
+ * Same as [`brotli::BrotliResult`] except [`brotli::BrotliResult::ResultFailure`].
+ *
+ * Always `> 0`.
+ *
+ * `ResultFailure` is removed
+ * because we will convert the failure to an actual negative error code (if available) and pass it elsewhere.
+ * @enum {1 | 2 | 3}
+ */
+export declare const BrotliStreamResultCode: Readonly<{
+    ResultSuccess: 1;
+    "1": "ResultSuccess";
+    NeedsMoreInput: 2;
+    "2": "NeedsMoreInput";
+    NeedsMoreOutput: 3;
+    "3": "NeedsMoreOutput";
+}>;
+export declare class CompressStream {
+    __wbg_ptr: number;
+    __destroy_into_raw(): number;
+    free(): void;
+    /**
+     * @param {Uint8Array | null | undefined} input_opt
+     * @param {number} output_size
+     * @returns {BrotliStreamResult}
+     */
+    compress(input_opt: Uint8Array | null | undefined, output_size: number): BrotliStreamResult;
+    /**
+     * @param {number | null} [quality]
+     * @param {Uint8Array | null} [custom_dictionary]
+     */
+    constructor(quality?: number | null, custom_dictionary?: Uint8Array | null);
+    /**
+     * @returns {number}
+     */
+    total_out(): number;
+}
+export declare class DecompressStream {
+    __wbg_ptr: number;
+    __destroy_into_raw(): number;
+    free(): void;
+    /**
+     * @param {Uint8Array} input
+     * @param {number} output_size
+     * @returns {BrotliStreamResult}
+     */
+    decompress(input: Uint8Array, output_size: number): BrotliStreamResult;
+    /**
+     * @param {Uint8Array | null} [custom_dictionary]
+     */
+    constructor(custom_dictionary?: Uint8Array | null);
+    /**
+     * @returns {number}
+     */
+    total_out(): number;
+}
+/**
+ * @param {Uint8Array} buf
+ * @param {any} raw_options
+ * @returns {Uint8Array}
+ */
+export declare function compress(buf: Uint8Array, raw_options: any): Uint8Array;
+/**
+ * @param {Uint8Array} buf
+ * @param {any} raw_options
+ * @returns {Uint8Array}
+ */
+export declare function decompress(buf: Uint8Array, raw_options: any): Uint8Array;
+declare function initSync(module: any): any;
+declare function __wbg_init(module_or_path: any): Promise<any>;
+export { initSync, __wbg_init as default };

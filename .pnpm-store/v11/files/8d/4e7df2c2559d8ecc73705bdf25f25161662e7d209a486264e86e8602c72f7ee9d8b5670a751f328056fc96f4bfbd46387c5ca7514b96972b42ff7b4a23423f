@@ -1,0 +1,9 @@
+/*! Copyright 2017 Google Inc. All Rights Reserved.
+   Distributed under MIT license.
+   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
+*/
+import { IBrotliDecompressOptions } from './common.js';
+/**
+ * @type {function(!Uint8Array, Options=):!Uint8Array}
+ */
+export declare let decompress: (input: Uint8Array, options: IBrotliDecompressOptions) => Uint8Array;

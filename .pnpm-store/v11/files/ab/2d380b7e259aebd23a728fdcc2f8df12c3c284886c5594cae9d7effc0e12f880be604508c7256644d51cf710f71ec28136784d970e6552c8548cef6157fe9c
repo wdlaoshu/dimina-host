@@ -1,0 +1,10 @@
+export interface IBrotliDecompressOptions {
+    wasmFileUrl?: string;
+    customDictionary?: Uint8Array;
+}
+export interface IBrotliCompressOptions {
+    quality?: number;
+    wasmFileUrl?: string;
+    customDictionary?: Uint8Array;
+}
+export declare const mapDecompressOptions: (options: IBrotliDecompressOptions) => IBrotliDecompressOptions;

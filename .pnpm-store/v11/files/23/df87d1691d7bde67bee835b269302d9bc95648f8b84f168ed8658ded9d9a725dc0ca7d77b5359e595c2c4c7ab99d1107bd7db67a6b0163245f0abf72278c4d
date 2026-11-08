@@ -1,0 +1,131 @@
+{
+  "name": "brotli-compress",
+  "version": "2.2.2",
+  "description": "WASM based, asynchronous Brotli compression and decompression package that works in browsers and Node.js; CommonJS and ESM",
+  "keywords": [
+    "brotli",
+    "compress",
+    "decompress",
+    "wasm",
+    "webassembly",
+    "async",
+    "typescript",
+    "browser",
+    "Node.js"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "prebuild": "rm -rf dist",
+    "build": "tsx ./build.ts",
+    "postbuild": "tsc && tsx ./build.types.ts",
+    "verify:package": "npm run build && tsx ./scripts/verify-package.ts",
+    "gate": "tsx ./scripts/release-gate/release-gate.ts",
+    "fixtures:generate": "npm run build && tsx ./scripts/generate-fixtures.ts",
+    "test:e2e": "npm run build && tsx ./scripts/e2e-releases.ts",
+    "test:fuzz": "npm run build && tsx ./scripts/fuzz-regression.ts",
+    "prepack": "npm run build",
+    "deploy": "npm publish",
+    "prepublishOnly": "npm run gate",
+    "release": "npm run build && npm publish --ignore-scripts",
+    "pretest": "npm run build",
+    "test": "vitest run && tsx ./scripts/fuzz-regression.ts && tsx ./scripts/e2e-releases.ts && tsx ./scripts/release-gate/release-gate.ts",
+    "prebench": "npm run build",
+    "bench": "node --expose-gc bench/memory.mjs"
+  },
+  "type": "module",
+  "main": "./index.cjs",
+  "module": "./index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./index.cjs"
+      }
+    },
+    "./js": {
+      "import": {
+        "types": "./dist/js.d.mts",
+        "default": "./js.mjs"
+      },
+      "require": {
+        "types": "./dist/js.d.cts",
+        "default": "./js.cjs"
+      }
+    },
+    "./external": {
+      "types": "./dist/index.d.mts",
+      "import": "./index.external.mjs"
+    },
+    "./brotli_wasm_bg.wasm": "./brotli_wasm_bg.wasm",
+    "./index.js": {
+      "types": "./dist/index.d.cts",
+      "default": "./index.cjs"
+    },
+    "./index.mjs": {
+      "types": "./dist/index.d.mts",
+      "default": "./index.mjs"
+    },
+    "./index.cjs": {
+      "types": "./dist/index.d.cts",
+      "default": "./index.cjs"
+    },
+    "./js.js": {
+      "types": "./dist/js.d.cts",
+      "default": "./js.cjs"
+    },
+    "./js.mjs": {
+      "types": "./dist/js.d.mts",
+      "default": "./js.mjs"
+    },
+    "./js.cjs": {
+      "types": "./dist/js.d.cts",
+      "default": "./js.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.mjs",
+    "index.cjs",
+    "index.external.mjs",
+    "js.mjs",
+    "js.cjs",
+    "brotli_wasm_bg.wasm",
+    "dist",
+    "LICENSE-MIT"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kyr0/brotli-compress.git"
+  },
+  "author": "Aron Homberg <info@aron-homberg.de>, Tim Perry <tim@httptoolkit.tech>",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/kyr0/brotli-compress/issues"
+  },
+  "homepage": "https://github.com/kyr0/brotli-compress#readme",
+  "dependencies": {
+    "brotli-wasm-custom-dictionary": "3.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@vitest/browser": "^4.1.10",
+    "@vitest/browser-playwright": "^4.1.10",
+    "buffer": "^6.0.3",
+    "esbuild": "^0.28.1",
+    "playwright": "^1.61.1",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "picomatch": "^2.3.2"
+  }
+}

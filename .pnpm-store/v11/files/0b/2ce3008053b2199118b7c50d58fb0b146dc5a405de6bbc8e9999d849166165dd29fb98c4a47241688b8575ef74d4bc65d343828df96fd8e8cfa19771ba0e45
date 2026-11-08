@@ -1,0 +1,72 @@
+/* tslint:disable */
+/* eslint-disable */
+
+
+type Options = {
+    quality?: number
+    customDictionary?: Uint8Array
+};
+
+type DecompressOptions = {
+    customDictionary?: Uint8Array
+};
+
+export function compress(buf: Uint8Array, options?: Options): Uint8Array;
+export function decompress(buf: Uint8Array, options?: DecompressOptions): Uint8Array;
+
+
+
+/**
+ * Returned by every successful (de)compression.
+ */
+export class BrotliStreamResult {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Output buffer
+     */
+    buf: Uint8Array;
+    /**
+     * Result code.
+     *
+     * See [`BrotliStreamResultCode`] for available values.
+     *
+     * When error, the error code is not passed here but rather goes to `Err`.
+     */
+    code: BrotliStreamResultCode;
+    /**
+     * Consumed bytes of the input buffer
+     */
+    input_offset: number;
+}
+
+/**
+ * Same as [`brotli::BrotliResult`] except [`brotli::BrotliResult::ResultFailure`].
+ *
+ * Always `> 0`.
+ *
+ * `ResultFailure` is removed
+ * because we will convert the failure to an actual negative error code (if available) and pass it elsewhere.
+ */
+export enum BrotliStreamResultCode {
+    ResultSuccess = 1,
+    NeedsMoreInput = 2,
+    NeedsMoreOutput = 3,
+}
+
+export class CompressStream {
+    free(): void;
+    [Symbol.dispose](): void;
+    compress(input_opt: Uint8Array | null | undefined, output_size: number): BrotliStreamResult;
+    constructor(quality?: number | null, custom_dictionary?: Uint8Array | null);
+    total_out(): number;
+}
+
+export class DecompressStream {
+    free(): void;
+    [Symbol.dispose](): void;
+    decompress(input: Uint8Array, output_size: number): BrotliStreamResult;
+    constructor(custom_dictionary?: Uint8Array | null);
+    total_out(): number;
+}
