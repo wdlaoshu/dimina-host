@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - dream-tapir
     paths:
       - 'iOS/**'
       - 'fe/**'

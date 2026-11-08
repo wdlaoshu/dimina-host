@@ -1,0 +1,241 @@
+name: Dream Tapir Release
+
+# 构建 Dream Tapir 宿主壳（Android + iOS），并统一发布到 GitHub Release，
+# 便于直接下载安装包，无需进入 Actions Artifacts。
+on:
+  push:
+    branches:
+      - dream-tapir
+    paths:
+      - 'android/**'
+      - 'iOS/**'
+      - 'fe/**'
+      - 'examples/miniprogram/**'
+      - 'shared/**'
+      - 'third_party/**'
+      - 'Package.swift'
+      - '.github/workflows/dream-tapir-release.yml'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（留空则读取 android/app/build.gradle.kts 的 versionName）'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dream-tapir-release
+  cancel-in-progress: true
+
+jobs:
+  meta:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve version and tag
+        id: version
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION=$(sed -n 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' android/app/build.gradle.kts | head -n1)
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "Failed to resolve versionName" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=dream-tapir-v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Release tag: dream-tapir-v$VERSION"
+
+  android:
+    name: Build Android APK
+    needs: meta
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: fe/.nvmrc
+
+      - name: Setup pnpm
+        uses: pnpm/setup@v2
+        with:
+          version: 12.2.0
+          package-json-file: fe/package.json
+          install: false
+
+      - name: Compile mini programs
+        working-directory: ./fe
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm compile
+          pnpm generate:app
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Build debug APK
+        run: |
+          cd android
+          chmod +x ./gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dream-tapir-android-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
+
+  ios:
+    name: Build iOS packages
+    needs: meta
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: fe/.nvmrc
+
+      - name: Setup pnpm
+        uses: pnpm/setup@v2
+        with:
+          version: 12.2.0
+          package-json-file: fe/package.json
+          install: false
+
+      - name: Compile mini programs
+        working-directory: ./fe
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm compile
+          pnpm generate:app
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.5'
+
+      - name: Resolve Xcode package dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project iOS/dimina.xcodeproj \
+            -scheme dimina
+
+      - name: Build simulator app
+        run: |
+          chmod +x iOS/copy-shared-resources.sh
+          xcodebuild build \
+            -project iOS/dimina.xcodeproj \
+            -scheme dimina \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/ios-simulator"
+
+      - name: Build unsigned device app
+        run: |
+          xcodebuild build \
+            -project iOS/dimina.xcodeproj \
+            -scheme dimina \
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/ios-device" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          SIM_APP="$RUNNER_TEMP/ios-simulator/Build/Products/Debug-iphonesimulator/dimina.app"
+          DEVICE_APP="$RUNNER_TEMP/ios-device/Build/Products/Debug-iphoneos/dimina.app"
+          test -d "$SIM_APP"
+          test -d "$DEVICE_APP"
+
+          mkdir -p "$RUNNER_TEMP/ios-artifacts"
+          ditto -c -k --sequesterRsrc --keepParent "$SIM_APP" "$RUNNER_TEMP/ios-artifacts/DreamTapir-simulator.zip"
+
+          rm -rf "$RUNNER_TEMP/ipa"
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$DEVICE_APP" "$RUNNER_TEMP/ipa/Payload/"
+          cd "$RUNNER_TEMP/ipa"
+          zip -qry "$RUNNER_TEMP/ios-artifacts/DreamTapir-unsigned.ipa" Payload
+
+      - name: Upload iOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dream-tapir-ios-packages
+          path: ${{ runner.temp }}/ios-artifacts/*
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: [meta, android, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          VERSION="${{ needs.meta.outputs.version }}"
+          APK=$(find artifacts -name 'app-debug.apk' | head -n1)
+          IPA=$(find artifacts -name '*.ipa' | head -n1)
+          SIM=$(find artifacts -name '*simulator.zip' | head -n1)
+          test -n "$APK"
+          test -n "$IPA"
+          test -n "$SIM"
+          cp "$APK" "release-assets/DreamTapir-v${VERSION}-debug.apk"
+          cp "$IPA" "release-assets/DreamTapir-v${VERSION}-unsigned.ipa"
+          cp "$SIM" "release-assets/DreamTapir-v${VERSION}-simulator.zip"
+          ls -lh release-assets
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: Dream Tapir v${{ needs.meta.outputs.version }}
+          overwrite_files: true
+          body: |
+            Dream Tapir 多端宿主壳 v${{ needs.meta.outputs.version }}
+
+            | 平台 | 文件 | 说明 |
+            | --- | --- | --- |
+            | Android | `DreamTapir-v${{ needs.meta.outputs.version }}-debug.apk` | 直接安装（debug 签名） |
+            | iOS（真机） | `DreamTapir-v${{ needs.meta.outputs.version }}-unsigned.ipa` | 未签名，需自签后安装 |
+            | iOS（模拟器） | `DreamTapir-v${{ needs.meta.outputs.version }}-simulator.zip` | 解压后拖入模拟器运行 |
+
+            提交：${{ github.sha }}
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
