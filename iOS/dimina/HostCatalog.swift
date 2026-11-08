@@ -13,7 +13,7 @@ import UIKit
 
 // MARK: - Models
 
-struct HostRemoteApp: Identifiable, Codable, Hashable {
+struct HostRemoteApp: Identifiable, Decodable, Hashable {
     let appId: String
     let name: String
     let versionCode: Int
@@ -86,7 +86,7 @@ struct HostRemoteApp: Identifiable, Codable, Hashable {
     }
 }
 
-struct HostCatalogDoc: Codable {
+struct HostCatalogDoc: Decodable {
     let schema: Int?
     let channel: String?
     let generatedAt: String?
