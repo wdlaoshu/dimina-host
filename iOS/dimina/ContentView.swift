@@ -33,146 +33,142 @@ struct ContentView: View {
         let items = store.filteredApps(query: searchText)
         let recent = store.recentApps
 
-        NavigationView {
-            ZStack(alignment: .bottom) {
-                HostTheme.bg.ignoresSafeArea()
+        ZStack(alignment: .bottom) {
+            HostTheme.bg.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    header
-                    searchBar
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 14) {
-                            if !recent.isEmpty {
-                                sectionHeader("最近使用", trailing: "\(recent.count)")
-                                recentRow(recent)
-                            }
+            VStack(spacing: 0) {
+                header
+                searchBar
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if !recent.isEmpty {
+                            sectionHeader("最近使用", trailing: "\(recent.count)")
+                            recentRow(recent)
+                        }
 
-                            sectionHeader("全部应用", trailing: "共 \(items.count) 个")
+                        sectionHeader("全部应用", trailing: "共 \(items.count) 个")
 
-                            if items.isEmpty {
-                                emptyState
-                            } else {
-                                LazyVGrid(
-                                    columns: Array(
-                                        repeating: GridItem(.flexible(), spacing: 12),
-                                        count: 3
-                                    ),
-                                    spacing: 12
-                                ) {
-                                    ForEach(items) { app in
-                                        appCard(app)
-                                    }
+                        if items.isEmpty {
+                            emptyState
+                        } else {
+                            LazyVGrid(
+                                columns: Array(
+                                    repeating: GridItem(.flexible(), spacing: 12),
+                                    count: 3
+                                ),
+                                spacing: 12
+                            ) {
+                                ForEach(items) { app in
+                                    appCard(app)
                                 }
                             }
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 6)
-                        .padding(.bottom, 32)
                     }
-                    .scrollIndicators(.hidden)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
+                    .padding(.bottom, 32)
                 }
+                .scrollIndicators(.hidden)
+            }
 
-                if isInstalling {
-                    installingOverlay
-                }
+            if isInstalling {
+                installingOverlay
+            }
 
-                if let toast {
-                    Text(toast)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(Color.black.opacity(0.82))
-                        .clipShape(Capsule())
-                        .padding(.bottom, 26)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
+            if let toast {
+                Text(toast)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.black.opacity(0.82))
+                    .clipShape(Capsule())
+                    .padding(.bottom, 26)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationBarHidden(true)
-            .preferredColorScheme(.light)
-            .onAppear {
-                setupNavigationController()
-                autoOpenAppForTestIfRequested()
-                permissions.refresh()
-            }
-            .sheet(item: $selectedApp) { app in
-                HostAppDetailSheet(
-                    app: app,
-                    onOpen: {
-                        selectedApp = nil
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
-                            open(app)
-                        }
-                    },
-                    onCheckUpdate: {
-                        await store.checkForUpdate(app)
-                    },
-                    onUninstall: {
-                        selectedApp = nil
-                        uninstallTarget = app
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
-                            showUninstallConfirm = true
-                        }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .preferredColorScheme(.light)
+        .onAppear {
+            autoOpenAppForTestIfRequested()
+            permissions.refresh()
+        }
+        .sheet(item: $selectedApp) { app in
+            HostAppDetailSheet(
+                app: app,
+                onOpen: {
+                    selectedApp = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                        open(app)
                     }
-                )
-            }
-            .sheet(isPresented: $showSettings) {
-                HostSettingsSheet(
-                    network: network,
-                    permissions: permissions,
-                    onOpenSettings: { permissions.openSettings() }
-                )
-            }
-            .fileImporter(
-                isPresented: $showFileImporter,
-                allowedContentTypes: [.zip],
-                allowsMultipleSelection: false
-            ) { result in
-                switch result {
-                case .success(let urls):
-                    guard let url = urls.first else { return }
-                    do {
-                        pendingImport = try HostStore.prepareImport(from: url)
-                    } catch {
-                        showToast("读取失败：\(error.localizedDescription)")
+                },
+                onCheckUpdate: {
+                    await store.checkForUpdate(app)
+                },
+                onUninstall: {
+                    selectedApp = nil
+                    uninstallTarget = app
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                        showUninstallConfirm = true
                     }
-                case .failure(let error):
-                    showToast("选择文件失败：\(error.localizedDescription)")
                 }
-            }
-            .alert(item: $pendingImport) { pkg in
-                Alert(
-                    title: Text("导入小程序"),
-                    message: Text(
-                        "\(pkg.name)\n版本 \(pkg.versionName)\n\(pkg.appId)\n\n" +
-                            "导入后会覆盖同 appId 的本地包，用户数据默认保留。"
-                    ),
-                    primaryButton: .default(Text("导入")) {
-                        Task { await install(pkg) }
-                    },
-                    secondaryButton: .cancel(Text("取消")) {
-                        try? FileManager.default.removeItem(at: pkg.fileURL)
-                    }
-                )
-            }
-            .confirmationDialog(
-                "卸载 \(uninstallTarget?.name ?? "小程序")？",
-                isPresented: $showUninstallConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("卸载", role: .destructive) {
-                    guard let app = uninstallTarget else { return }
-                    Task { await uninstall(app) }
+            )
+        }
+        .sheet(isPresented: $showSettings) {
+            HostSettingsSheet(
+                network: network,
+                permissions: permissions,
+                onOpenSettings: { permissions.openSettings() }
+            )
+        }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: [.zip],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                do {
+                    pendingImport = try HostStore.prepareImport(from: url)
+                } catch {
+                    showToast("读取失败：\(error.localizedDescription)")
                 }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text(
-                    uninstallTarget?.bundled == true
-                        ? "将移除本地安装包并停止运行。内置版本会在下次启动时恢复，用户数据默认保留。"
-                        : "将移除已导入的小程序包，用户数据默认保留。"
-                )
+            case .failure(let error):
+                showToast("选择文件失败：\(error.localizedDescription)")
             }
+        }
+        .alert(item: $pendingImport) { pkg in
+            Alert(
+                title: Text("导入小程序"),
+                message: Text(
+                    "\(pkg.name)\n版本 \(pkg.versionName)\n\(pkg.appId)\n\n" +
+                        "导入后会覆盖同 appId 的本地包，用户数据默认保留。"
+                ),
+                primaryButton: .default(Text("导入")) {
+                    Task { await install(pkg) }
+                },
+                secondaryButton: .cancel(Text("取消")) {
+                    try? FileManager.default.removeItem(at: pkg.fileURL)
+                }
+            )
+        }
+        .confirmationDialog(
+            "卸载 \(uninstallTarget?.name ?? "小程序")？",
+            isPresented: $showUninstallConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("卸载", role: .destructive) {
+                guard let app = uninstallTarget else { return }
+                Task { await uninstall(app) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(
+                uninstallTarget?.bundled == true
+                    ? "将移除本地安装包并停止运行。内置版本会在下次启动时恢复，用户数据默认保留。"
+                    : "将移除已导入的小程序包，用户数据默认保留。"
+            )
         }
     }
 
@@ -180,22 +176,6 @@ struct ContentView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(red: 0.36, green: 0.48, blue: 1),
-                                     Color(red: 0.48, green: 0.36, blue: 1)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                Text("D")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(.white)
-            }
-            .frame(width: 42, height: 42)
-
             VStack(alignment: .leading, spacing: 2) {
                 Text("Dream Tapir")
                     .font(.system(size: 21, weight: .bold))
@@ -519,39 +499,9 @@ struct ContentView: View {
             return
         }
         ContentView.didAutoOpenForTest = true
-        // setupNavigationController 在 onAppear 中先向 main 队列入队；这里再入队
-        // 即按 FIFO 排在其后，执行时导航控制器已就绪，无需定时等待
+        // 导航控制器由 HostRootView 在应用启动时创建并注入，这里可直接打开
         DispatchQueue.main.async {
             open(item)
-        }
-    }
-
-    private func setupNavigationController() {
-        // 在视图出现时获取并保存导航控制器
-        DispatchQueue.main.async {
-            if ContentView.navigationController == nil,
-               let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-               let window = windowScene.windows.first,
-               let rootVC = window.rootViewController {
-
-                // 尝试获取根导航控制器
-                if let navController = rootVC as? UINavigationController {
-                    ContentView.navigationController = navController
-                } else {
-                    // 如果没有导航控制器，替换根视图控制器为导航控制器
-                    let navController = UINavigationController()
-
-                    // 使用UIHostingController包装当前视图，避免重复创建ContentView
-                    let hostingController = UIHostingController(rootView: self)
-                    hostingController.navigationItem.title = "Dream Tapir"
-
-                    // 设置为根视图
-                    navController.viewControllers = [hostingController]
-                    window.rootViewController = navController
-
-                    ContentView.navigationController = navController
-                }
-            }
         }
     }
 }
