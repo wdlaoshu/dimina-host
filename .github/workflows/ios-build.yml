@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - dream-tapir
     paths:
       - 'iOS/**'
       - 'fe/**'
@@ -88,17 +89,17 @@ jobs:
           test -d "$DEVICE_APP"
 
           mkdir -p "$RUNNER_TEMP/ios-artifacts"
-          ditto -c -k --sequesterRsrc --keepParent "$SIM_APP" "$RUNNER_TEMP/ios-artifacts/DiminaHost-simulator.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$SIM_APP" "$RUNNER_TEMP/ios-artifacts/DreamTapir-simulator.zip"
 
           rm -rf "$RUNNER_TEMP/ipa"
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
           cp -R "$DEVICE_APP" "$RUNNER_TEMP/ipa/Payload/"
           cd "$RUNNER_TEMP/ipa"
-          zip -qry "$RUNNER_TEMP/ios-artifacts/DiminaHost-unsigned.ipa" Payload
+          zip -qry "$RUNNER_TEMP/ios-artifacts/DreamTapir-unsigned.ipa" Payload
 
       - name: Upload iOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dimina-host-ios
+          name: dream-tapir-ios
           path: ${{ runner.temp }}/ios-artifacts/*
           retention-days: 14

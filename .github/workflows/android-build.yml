@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - dream-tapir
     paths:
       - 'android/**'
       - 'fe/**'
@@ -136,7 +137,7 @@ jobs:
         if: env.has_apk == 'false'
         uses: actions/upload-artifact@v4
         with:
-          name: dimina-host-android-debug
+          name: dream-tapir-android-debug
           path: ${{ env.APK_PATH }}
           retention-days: 14
 

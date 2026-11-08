@@ -3,7 +3,7 @@
     androidx.compose.material3.ExperimentalMaterial3Api::class,
 )
 
-package com.didi.dimina.demo
+package com.dreamtapir.host
 
 import android.app.Activity
 import android.content.Context
@@ -469,7 +469,7 @@ private fun HostHeader(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "星",
+                text = "D",
                 color = Color.White,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
@@ -478,7 +478,7 @@ private fun HostHeader(
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "星河小程序",
+                text = "Dream Tapir",
                 color = HostText,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,

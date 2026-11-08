@@ -1,4 +1,4 @@
-package com.didi.dimina.demo
+package com.dreamtapir.host
 
 import android.app.Application
 import com.didi.dimina.Dimina

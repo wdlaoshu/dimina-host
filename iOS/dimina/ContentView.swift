@@ -190,14 +190,14 @@ struct ContentView: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                Text("星")
+                Text("D")
                     .font(.system(size: 20, weight: .bold))
                     .foregroundColor(.white)
             }
             .frame(width: 42, height: 42)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("星河小程序")
+                Text("Dream Tapir")
                     .font(.system(size: 21, weight: .bold))
                     .foregroundColor(HostTheme.text)
                 Text("本地运行 · \(store.apps.count) 个应用")
@@ -543,7 +543,7 @@ struct ContentView: View {
 
                     // 使用UIHostingController包装当前视图，避免重复创建ContentView
                     let hostingController = UIHostingController(rootView: self)
-                    hostingController.navigationItem.title = "星河小程序"
+                    hostingController.navigationItem.title = "Dream Tapir"
 
                     // 设置为根视图
                     navController.viewControllers = [hostingController]

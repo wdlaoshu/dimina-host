@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Dream Tapir</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -19,23 +21,23 @@
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Dimina uses Bluetooth to discover and connect to nearby devices.</string>
+	<string>Dream Tapir uses Bluetooth to discover and connect to nearby devices.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>Dimina uses Bluetooth to communicate with nearby devices.</string>
+	<string>Dream Tapir uses Bluetooth to communicate with nearby devices.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Dimina NSCameraUsageDescription</string>
+	<string>Dream Tapir NSCameraUsageDescription</string>
 	<key>NSContactsUsageDescription</key>
-	<string>Dimina uses contacts when a mini program requests contact authorization.</string>
+	<string>Dream Tapir uses contacts when a mini program requests contact authorization.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Dimina uses the local network to discover and communicate with nearby services and devices.</string>
+	<string>Dream Tapir uses the local network to discover and communicate with nearby services and devices.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Dimina uses your location while a mini program is in use.</string>
+	<string>Dream Tapir uses your location while a mini program is in use.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Dimina NSMicrophoneUsageDescription</string>
+	<string>Dream Tapir NSMicrophoneUsageDescription</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Dimina saves images and videos to your photo library when requested.</string>
+	<string>Dream Tapir saves images and videos to your photo library when requested.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Dimina NSPhotoLibraryUsageDescription</string>
+	<string>Dream Tapir NSPhotoLibraryUsageDescription</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
