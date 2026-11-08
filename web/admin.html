@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dream Tapir · 发布控制台</title>
+  <meta name="description" content="拖入小程序 ZIP，本地生成 apps.json 与上传清单。" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="index.html">
+        <span class="brand-mark">DT</span>
+        <span>
+          <span class="brand-name">Dream Tapir</span>
+          <span class="brand-sub">小程序中心 · 内部分发</span>
+        </span>
+      </a>
+      <nav class="nav-links">
+        <a class="nav-link" href="index.html">应用目录</a>
+        <a class="nav-link active" href="admin.html">发布控制台</a>
+        <a class="nav-link" href="index.html#deploy">部署说明</a>
+        <a class="btn soft small" href="index.html">查看目录</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="page-head">
+      <span class="eyebrow"><span class="dot"></span><span>本地解析 · 文件不会上传到任何服务器</span></span>
+      <h1>发布控制台</h1>
+      <p>
+        拖入小程序 ZIP，自动读取 <code>config.json</code>、计算 SHA-256，生成宿主可直接使用的
+        <code>apps.json</code> 与上传清单。改完名称和更新说明后下载，上传到宝塔站点根目录即可。
+      </p>
+      <div class="status-line">
+        <span class="status-dot" id="env-dot"></span>
+        <span id="env-text">正在检查浏览器能力…</span>
+      </div>
+    </section>
+
+    <div class="admin-grid">
+      <section class="panel">
+        <h2>1. 拖入安装包</h2>
+        <p class="hint">
+          ZIP 根目录需包含 <code>config.json</code>（appId、name、versionCode、versionName）。
+          也可以一起拖入图标图片，文件名与 appId 相同时会自动关联。
+        </p>
+        <div class="dropzone" id="dropzone" role="button" tabindex="0">
+          <strong>拖入 ZIP / 图标，或点击选择文件</strong>
+          <div>自动解析应用信息并计算 SHA-256</div>
+          <div class="sub">支持 .zip / .png / .jpg / .webp</div>
+        </div>
+        <input class="sr-only" id="file-input" type="file" multiple accept=".zip,.png,.jpg,.jpeg,.webp,.svg" />
+        <div class="btn-row" style="margin-top: 12px">
+          <button class="btn ghost small" id="add-entry" type="button">手动添加</button>
+          <button class="btn ghost small" id="import-catalog" type="button">导入现有 apps.json</button>
+          <button class="btn ghost small" id="clear-all" type="button">清空</button>
+        </div>
+        <input class="sr-only" id="json-input" type="file" accept=".json,application/json" />
+      </section>
+
+      <section class="panel">
+        <h2>2. 目录设置</h2>
+        <p class="hint">
+          渠道用于灰度分发，非 <code>prod</code> 渠道会在宿主目录地址后追加 <code>?channel=</code>。
+          生成时间在每次导出时自动更新。
+        </p>
+        <div class="field">
+          <label for="channel">渠道</label>
+          <input class="input" id="channel" value="prod" spellcheck="false" />
+        </div>
+        <div class="field">
+          <label for="root-hint">安装包目标路径规则</label>
+          <input class="input" id="root-hint" value="packages/{appId}/{versionCode}.zip" readonly />
+        </div>
+        <div class="status-line">
+          <span class="status-dot ok" id="entry-dot"></span>
+          <span id="entry-count">0 个应用条目</span>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel" style="margin-bottom: 14px">
+      <h2>3. 应用条目</h2>
+      <p class="hint">可以修改名称、版本、更新说明；包路径默认按 appId 与版本号生成。</p>
+      <div class="entries" id="entries"></div>
+      <div class="empty" id="entries-empty">
+        <div class="big">◌</div>
+        <h3>还没有应用条目</h3>
+        <p>拖入 ZIP 或导入现有 apps.json 后，这里会列出每个应用的可编辑信息。</p>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-bottom: 14px">
+      <h2>4. 上传清单</h2>
+      <p class="hint">按目标路径上传到宝塔站点，最后把 apps.json 放在站点根目录。</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>源文件</th>
+              <th>目标路径</th>
+              <th>体积</th>
+              <th>SHA-256</th>
+            </tr>
+          </thead>
+          <tbody id="manifest-body">
+            <tr>
+              <td colspan="4">暂无需要上传的文件</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="btn-row" style="margin-top: 12px">
+        <button class="btn ghost small" id="copy-manifest" type="button">复制上传清单</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>5. apps.json</h2>
+      <p class="hint">下载后上传到站点根目录，宿主下拉刷新即可发现新版本。</p>
+      <div class="btn-row">
+        <button class="btn primary" id="download-json" type="button">下载 apps.json</button>
+        <button class="btn ghost" id="copy-json" type="button">复制 JSON</button>
+        <a class="btn soft" href="index.html">查看应用目录</a>
+      </div>
+      <pre class="code-preview" id="json-preview">{}</pre>
+    </section>
+
+    <footer class="footer">
+      <span>Dream Tapir · 发布控制台</span>
+      <span>纯前端 · 本机计算</span>
+    </footer>
+  </main>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="assets/admin.js"></script>
+</body>
+</html>

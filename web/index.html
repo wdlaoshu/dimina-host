@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dream Tapir · 小程序中心</title>
+  <meta name="description" content="Dream Tapir 内网小程序目录与安装包分发。" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="index.html">
+        <span class="brand-mark">DT</span>
+        <span>
+          <span class="brand-name">Dream Tapir</span>
+          <span class="brand-sub">小程序中心 · 内部分发</span>
+        </span>
+      </a>
+      <nav class="nav-links">
+        <a class="nav-link active" href="index.html">应用目录</a>
+        <a class="nav-link" href="admin.html">发布控制台</a>
+        <a class="nav-link" href="#deploy">部署说明</a>
+        <a class="btn soft small" href="admin.html">发布新版本</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <div>
+        <span class="eyebrow"><span class="dot"></span><span id="sync-text">正在读取应用目录…</span></span>
+        <h1>内网小程序<br /><span class="grad">随时可用</span></h1>
+        <p class="lead">
+          应用目录由静态站点托管。宿主 App 读取 <code>apps.json</code> 后即可安装、更新小程序，
+          无需重新打包宿主。所有安装包与图标都从这里分发。
+        </p>
+        <div class="hero-actions">
+          <a class="btn primary" href="#catalog">浏览应用</a>
+          <a class="btn ghost" href="admin.html">打开发布控制台</a>
+        </div>
+        <div class="source-line">
+          <span>目录地址</span>
+          <code id="source-url">./apps.json</code>
+          <button class="icon-btn" id="copy-source" title="复制目录地址" aria-label="复制目录地址">⧉</button>
+        </div>
+      </div>
+
+      <aside class="hero-panel">
+        <div class="stat-row">
+          <div class="stat">
+            <div class="num" id="stat-apps">—</div>
+            <div class="label">应用总数</div>
+          </div>
+          <div class="stat">
+            <div class="num" id="stat-size">—</div>
+            <div class="label">安装包体积</div>
+          </div>
+          <div class="stat">
+            <div class="num" id="stat-force">—</div>
+            <div class="label">强制更新</div>
+          </div>
+        </div>
+        <div class="donut-wrap">
+          <div class="donut" id="donut">
+            <div class="donut-center">
+              <div>
+                <strong id="donut-total">—</strong>
+                <span>总占用</span>
+              </div>
+            </div>
+          </div>
+          <div class="legend" id="legend"></div>
+        </div>
+      </aside>
+    </section>
+
+    <section id="catalog">
+      <div class="section-head">
+        <div>
+          <h2>应用目录</h2>
+          <p id="catalog-sub">正在读取…</p>
+        </div>
+        <a class="btn ghost small" id="catalog-link" href="./apps.json" target="_blank" rel="noopener">查看 apps.json</a>
+      </div>
+
+      <div class="demo-banner" id="demo-banner">
+        <span>ⓘ</span>
+        <span>当前展示的是示例数据。把发布控制台生成的 <code>apps.json</code> 上传到站点根目录后，刷新即可替换。</span>
+      </div>
+
+      <div class="toolbar">
+        <label class="search">
+          <span aria-hidden="true">⌕</span>
+          <input id="search" type="search" placeholder="搜索名称、appId 或更新说明" autocomplete="off" />
+        </label>
+        <div class="tabs" role="tablist" aria-label="目录筛选">
+          <button class="tab active" data-tab="all" role="tab">全部<span class="count" id="count-all"></span></button>
+          <button class="tab" data-tab="recent" role="tab">最近更新</button>
+          <button class="tab" data-tab="force" role="tab">强制更新<span class="count" id="count-force"></span></button>
+        </div>
+      </div>
+
+      <div class="grid" id="grid" aria-live="polite"></div>
+    </section>
+
+    <section class="deploy" id="deploy">
+      <div class="section-head">
+        <div>
+          <h2>宝塔静态托管</h2>
+          <p>不需要后端，把以下文件放到站点目录即可。</p>
+        </div>
+      </div>
+      <div class="deploy-grid">
+        <article class="deploy-card">
+          <div class="step">1</div>
+          <h3>上传目录文件</h3>
+          <p>把本站点文件（index.html、admin.html、assets/）放到站点根目录，开启 HTTPS。</p>
+          <code>站点根目录 /</code>
+        </article>
+        <article class="deploy-card">
+          <div class="step">2</div>
+          <h3>上传应用包</h3>
+          <p>每个版本一个 ZIP，根目录包含 config.json 与 main/，放在以 appId 命名的目录下。</p>
+          <code>packages/{appId}/{versionCode}.zip</code>
+        </article>
+        <article class="deploy-card">
+          <div class="step">3</div>
+          <h3>生成并上传 apps.json</h3>
+          <p>在发布控制台拖入 ZIP，自动读取版本并校验 SHA-256，导出 apps.json 后上传。</p>
+          <code>/apps.json</code>
+        </article>
+        <article class="deploy-card">
+          <div class="step">4</div>
+          <h3>宿主填写应用源</h3>
+          <p>在 App 设置中填写目录地址；宿主只允许同域下载，避免任意地址注入。</p>
+          <code>https://你的域名/apps.json</code>
+        </article>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span>Dream Tapir · 静态目录与分发</span>
+      <span id="footer-time">—</span>
+    </footer>
+  </main>
+
+  <div class="modal-mask" id="modal-mask">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-head">
+        <div class="app-icon" id="modal-icon">?</div>
+        <div>
+          <h3 id="modal-title">—</h3>
+          <div class="appid" id="modal-appid">—</div>
+        </div>
+        <button class="icon-btn modal-close" id="modal-close" aria-label="关闭">✕</button>
+      </div>
+      <div class="kv" id="modal-kv"></div>
+      <div class="note-box" id="modal-note-box">
+        <h4>更新说明</h4>
+        <p id="modal-note">—</p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="modal-copy">复制下载链接</button>
+        <a class="btn primary" id="modal-download" href="#" download>下载安装包</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>
