@@ -1,0 +1,104 @@
+name: Build iOS Host Shell
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'iOS/**'
+      - 'fe/**'
+      - 'examples/miniprogram/**'
+      - 'shared/**'
+      - 'third_party/**'
+      - 'Package.swift'
+      - '.github/workflows/ios-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build iOS host
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: fe/.nvmrc
+
+      - name: Setup pnpm
+        uses: pnpm/setup@v2
+        with:
+          version: 12.2.0
+          package-json-file: fe/package.json
+          install: false
+
+      - name: Compile mini programs
+        working-directory: ./fe
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm compile
+          pnpm generate:app
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.5'
+
+      - name: Resolve Xcode package dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project iOS/dimina.xcodeproj \
+            -scheme dimina
+
+      - name: Build simulator app
+        run: |
+          chmod +x iOS/copy-shared-resources.sh
+          xcodebuild build \
+            -project iOS/dimina.xcodeproj \
+            -scheme dimina \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/ios-simulator"
+
+      - name: Build unsigned device app
+        run: |
+          xcodebuild build \
+            -project iOS/dimina.xcodeproj \
+            -scheme dimina \
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/ios-device" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          SIM_APP="$RUNNER_TEMP/ios-simulator/Build/Products/Debug-iphonesimulator/dimina.app"
+          DEVICE_APP="$RUNNER_TEMP/ios-device/Build/Products/Debug-iphoneos/dimina.app"
+          test -d "$SIM_APP"
+          test -d "$DEVICE_APP"
+
+          mkdir -p "$RUNNER_TEMP/ios-artifacts"
+          ditto -c -k --sequesterRsrc --keepParent "$SIM_APP" "$RUNNER_TEMP/ios-artifacts/DiminaHost-simulator.zip"
+
+          rm -rf "$RUNNER_TEMP/ipa"
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$DEVICE_APP" "$RUNNER_TEMP/ipa/Payload/"
+          cd "$RUNNER_TEMP/ipa"
+          zip -qry "$RUNNER_TEMP/ios-artifacts/DiminaHost-unsigned.ipa" Payload
+
+      - name: Upload iOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dimina-host-ios
+          path: ${{ runner.temp }}/ios-artifacts/*
+          retention-days: 14

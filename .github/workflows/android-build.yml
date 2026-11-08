@@ -7,7 +7,16 @@ on:
       - main
     paths:
       - 'android/**'
+      - 'fe/**'
+      - 'examples/miniprogram/**'
+      - 'shared/**'
+      - '.github/workflows/android-build.yml'
   workflow_dispatch: # 允许手动触发
+    inputs:
+      force_build:
+        description: '忽略 Release 已有 APK，强制重新构建'
+        type: boolean
+        default: true
 
 jobs:
   build:
@@ -57,10 +66,37 @@ jobs:
             echo "release_exists=false" >> $GITHUB_ENV
             echo "has_apk=false" >> $GITHUB_ENV
           fi
+          if [ "${{ inputs.force_build }}" = "true" ]; then
+            echo "Manual build requested; build regardless of existing release assets"
+            echo "has_apk=false" >> $GITHUB_ENV
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 4. 设置 JDK 环境（Release 已有 APK 时无需准备构建环境）
+      # 4. 编译小程序并生成资源包（Release 已有 APK 时无需准备构建环境）
+      - name: Set up Node.js
+        if: env.has_apk == 'false'
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: fe/.nvmrc
+
+      - name: Setup pnpm
+        if: env.has_apk == 'false'
+        uses: pnpm/setup@v2
+        with:
+          version: 12.2.0
+          package-json-file: fe/package.json
+          install: false
+
+      - name: Compile mini programs
+        if: env.has_apk == 'false'
+        working-directory: ./fe
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm compile
+          pnpm generate:app
+
+      # 5. 设置 JDK 环境（Release 已有 APK 时无需准备构建环境）
       - name: Set up JDK 17
         if: env.has_apk == 'false'
         uses: actions/setup-java@v4
@@ -95,7 +131,16 @@ jobs:
           cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/app-debug-${TIMESTAMP}.apk
           echo "APK_PATH=android/app/build/outputs/apk/debug/app-debug-${TIMESTAMP}.apk" >> $GITHUB_ENV
 
-      # 8. 上传 APK 到现有 Release（仅当 Release 存在且没有 APK 时）
+      # 8. 上传 Debug APK 为 Actions 构建产物，便于直接下载安装
+      - name: Upload debug APK artifact
+        if: env.has_apk == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dimina-host-android-debug
+          path: ${{ env.APK_PATH }}
+          retention-days: 14
+
+      # 9. 上传 APK 到现有 Release（仅当 Release 存在且没有 APK 时）
       - name: Upload APK to Existing Release
         if: env.release_exists == 'true' && env.has_apk == 'false'
         uses: softprops/action-gh-release@v2
@@ -105,7 +150,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 9. 删除 Release 中的旧 APK（保留最新上传的）
+      # 10. 删除 Release 中的旧 APK（保留最新上传的）
       - name: Clean up old APKs from Release
         if: env.release_exists == 'true' && env.has_apk == 'false'
         run: |
