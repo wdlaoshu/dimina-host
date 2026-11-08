@@ -241,6 +241,7 @@ class DMPResourceManager {
                             appItem.path = path
                             appItem.versionCode = versionCode
                             appItem.versionName = versionName
+                            appItem.updateManifestUrl = jsonObject["updateManifestUrl"] as? String
                             appItem.color = randomColor
                             appItem.icon = icon
 
