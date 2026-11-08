@@ -7,6 +7,9 @@ pluginManagement {
                 includeGroupByRegex("androidx.*")
             }
         }
+        // Google's Maven Central mirror serves artifacts directly instead of
+        // redirecting the Kotlin compiler jar to GitHub Releases (504s).
+        maven("https://maven-central.storage-download.googleapis.com/maven2")
         maven("https://repo1.maven.org/maven2")
         mavenCentral()
         gradlePluginPortal()
@@ -20,6 +23,7 @@ dependencyResolutionManagement {
     repositories {
         mavenLocal()
         google()
+        maven("https://maven-central.storage-download.googleapis.com/maven2")
         maven("https://repo1.maven.org/maven2")
         mavenCentral()
         maven { url = uri("https://jitpack.io") }

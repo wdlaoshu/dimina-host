@@ -119,23 +119,7 @@ jobs:
           cd android
           chmod +x ./gradlew
 
-      # 6. 预置 Kotlin 编译器，避免 Maven Central 跳转 GitHub 时偶发 504
-      - name: Warm Kotlin compiler from Maven Central
-        if: env.has_apk == 'false'
-        run: |
-          VERSION=$(grep '^kotlin = ' android/gradle/libs.versions.toml | cut -d'"' -f2)
-          DEST="$HOME/.m2/repository/org/jetbrains/kotlin/kotlin-compiler-embeddable/$VERSION"
-          BASE="https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/$VERSION"
-          mkdir -p "$DEST"
-          curl -fL --retry 5 --retry-all-errors --max-time 300 \
-            -o "$DEST/kotlin-compiler-embeddable-$VERSION.jar" \
-            "$BASE/kotlin-compiler-embeddable-$VERSION.jar"
-          curl -fL --retry 5 --retry-all-errors --max-time 60 \
-            -o "$DEST/kotlin-compiler-embeddable-$VERSION.pom" \
-            "$BASE/kotlin-compiler-embeddable-$VERSION.pom"
-          ls -lh "$DEST"
-
-      # 7. 构建 Debug APK 并重命名为时间戳
+      # 6. 构建 Debug APK 并重命名为时间戳
       - name: Build Debug APK with Timestamp
         if: env.has_apk == 'false'
         run: |
