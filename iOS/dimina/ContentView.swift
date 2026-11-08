@@ -793,7 +793,7 @@ private struct HostSettingsSheet: View {
 
 // MARK: - Theme
 
-private enum HostTheme {
+enum HostTheme {
     static let bg = Color(red: 0.953, green: 0.961, blue: 0.984)
     static let surface = Color.white
     static let primary = Color(red: 0.231, green: 0.357, blue: 1)
