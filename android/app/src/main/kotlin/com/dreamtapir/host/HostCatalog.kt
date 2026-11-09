@@ -73,12 +73,23 @@ data class HostRemoteApp(
 data class HostCatalogConfig(
     val source: String = "",
     val channel: String = "prod",
+    val authUser: String = "",
+    val authPassword: String = "",
     val autoCheck: Boolean = true,
     val wifiOnlyAutoDownload: Boolean = true,
     val autoInstall: Boolean = false,
 ) {
     companion object {
         val Default = HostCatalogConfig()
+
+        /** Preemptive HTTP Basic credential for the private site (宝塔「密码访问」). */
+        fun basicAuthValue(user: String, password: String): String? {
+            val trimmed = user.trim()
+            if (trimmed.isEmpty()) return null
+            val credential = "$trimmed:$password"
+            val bytes = credential.toByteArray(Charsets.UTF_8)
+            return "Basic " + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+        }
     }
 }
 
@@ -153,6 +164,8 @@ object HostCatalogStore {
         return HostCatalogConfig(
             source = prefs.getString("source", "").orEmpty(),
             channel = prefs.getString("channel", "prod").orEmpty().ifBlank { "prod" },
+            authUser = prefs.getString("auth_user", "").orEmpty(),
+            authPassword = prefs.getString("auth_password", "").orEmpty(),
             autoCheck = prefs.getBoolean("auto_check", true),
             wifiOnlyAutoDownload = prefs.getBoolean("wifi_only", true),
             autoInstall = prefs.getBoolean("auto_install", false),
@@ -164,6 +177,8 @@ object HostCatalogStore {
             .putBoolean("initialized", true)
             .putString("source", config.source)
             .putString("channel", config.channel)
+            .putString("auth_user", config.authUser)
+            .putString("auth_password", config.authPassword)
             .putBoolean("auto_check", config.autoCheck)
             .putBoolean("wifi_only", config.wifiOnlyAutoDownload)
             .putBoolean("auto_install", config.autoInstall)
@@ -253,6 +268,13 @@ class HostCatalogController(
         updateConfig { it.copy(source = "") }
     }
 
+    private val authHeaderValue: String?
+        get() = HostCatalogConfig.basicAuthValue(config.authUser, config.authPassword)
+
+    private fun HttpURLConnection.applyAuth() {
+        authHeaderValue?.let { setRequestProperty("Authorization", it) }
+    }
+
     fun catalogUrl(): String? = buildCatalogUrl(config.source, config.channel)
 
     fun packageUrl(remote: HostRemoteApp): String? {
@@ -298,6 +320,7 @@ class HostCatalogController(
                     readTimeout = 20_000
                     requestMethod = "GET"
                     setRequestProperty("Accept", "application/json")
+                    applyAuth()
                     if (!force) {
                         HostCatalogStore.etag(context)?.let {
                             setRequestProperty("If-None-Match", it)
@@ -407,6 +430,7 @@ class HostCatalogController(
                     val connection = (URL(url).openConnection() as HttpURLConnection).apply {
                         connectTimeout = 15_000
                         readTimeout = 20_000
+                        applyAuth()
                     }
                     try {
                         if (connection.responseCode !in 200..299) return@launch
@@ -494,6 +518,7 @@ class HostCatalogController(
             connectTimeout = 20_000
             readTimeout = 60_000
             instanceFollowRedirects = true
+            applyAuth()
         }
         try {
             val code = connection.responseCode
@@ -571,6 +596,9 @@ class HostCatalogController(
                     val connection = (URL(url).openConnection() as HttpURLConnection).apply {
                         connectTimeout = 15_000
                         readTimeout = 15_000
+                        requestMethod = "GET"
+                        setRequestProperty("Accept", "application/json")
+                        applyAuth()
                     }
                     try {
                         val code = connection.responseCode
@@ -594,8 +622,18 @@ class HostCatalogController(
             result.onSuccess { response ->
                 lines += "HTTP：${response.code} · $elapsed ms"
                 lines += when (response.code) {
-                    401, 403 -> "鉴权：需要凭据（当前未提供）"
-                    in 200..299 -> "鉴权：无需凭据或已通过"
+                    401, 403 ->
+                        if (config.authUser.isBlank()) {
+                            "鉴权：站点要求凭据，请在设置里填写用户名和密码"
+                        } else {
+                            "鉴权：用户名或密码不正确（HTTP ${response.code}）"
+                        }
+                    in 200..299 ->
+                        if (config.authUser.isBlank()) {
+                            "鉴权：站点未启用密码访问（建议在宝塔开启）"
+                        } else {
+                            "鉴权：凭据有效"
+                        }
                     else -> "鉴权：服务器拒绝了请求"
                 }
                 response.contentType?.let { lines += "Content-Type：$it" }

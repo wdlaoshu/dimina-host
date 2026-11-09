@@ -1448,6 +1448,8 @@ private fun SettingsSheet(
 ) {
     var sourceDraft by remember { mutableStateOf(catalog.config.source) }
     var channelDraft by remember { mutableStateOf(catalog.config.channel) }
+    var authUserDraft by remember { mutableStateOf(catalog.config.authUser) }
+    var authPasswordDraft by remember { mutableStateOf(catalog.config.authPassword) }
     var showDiagnostics by remember { mutableStateOf(false) }
     var summary by remember { mutableStateOf(StorageSummary(0, 0, 0)) }
     var storageTick by remember { mutableIntStateOf(0) }
@@ -1493,6 +1495,18 @@ private fun SettingsSheet(
             placeholder = "渠道（prod / beta）",
             onValueChange = { channelDraft = it },
         )
+        Spacer(Modifier.height(8.dp))
+        SourceField(
+            value = authUserDraft,
+            placeholder = "访问用户名（未启用可留空）",
+            onValueChange = { authUserDraft = it },
+        )
+        Spacer(Modifier.height(8.dp))
+        SourceField(
+            value = authPasswordDraft,
+            placeholder = "访问密码",
+            onValueChange = { authPasswordDraft = it },
+        )
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
@@ -1501,6 +1515,8 @@ private fun SettingsSheet(
                         it.copy(
                             source = sourceDraft.trim(),
                             channel = channelDraft.trim().ifBlank { "prod" },
+                            authUser = authUserDraft.trim(),
+                            authPassword = authPasswordDraft,
                         )
                     }
                     onRefreshCatalog()
@@ -1517,7 +1533,11 @@ private fun SettingsSheet(
                     catalog.resetSource()
                     sourceDraft = catalog.config.source
                     channelDraft = "prod"
-                    catalog.updateConfig { it.copy(channel = "prod") }
+                    authUserDraft = ""
+                    authPasswordDraft = ""
+                    catalog.updateConfig {
+                        it.copy(channel = "prod", authUser = "", authPassword = "")
+                    }
                 },
                 modifier = Modifier
                     .weight(1f)
@@ -1528,7 +1548,7 @@ private fun SettingsSheet(
             }
         }
         Text(
-            "地址支持直接填写 apps.json，或填写站点根路径自动补全 /apps.json。安装包与图标必须与应用源同域。",
+            "地址支持直接填写 apps.json，或填写站点根路径自动补全 /apps.json。安装包与图标必须与应用源同域。若站点在宝塔开启了「密码访问」，填写对应的用户名和密码，目录、安装包、图标请求都会自动携带。",
             color = HostMuted,
             fontSize = 11.sp,
             lineHeight = 16.sp,

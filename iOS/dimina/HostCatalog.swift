@@ -98,6 +98,8 @@ struct HostCatalogDoc: Decodable {
 struct HostCatalogConfig: Codable, Equatable {
     var source: String
     var channel: String
+    var authUser: String
+    var authPassword: String
     var autoCheck: Bool
     var wifiOnlyAutoDownload: Bool
     var autoInstall: Bool
@@ -105,6 +107,8 @@ struct HostCatalogConfig: Codable, Equatable {
     static let `default` = HostCatalogConfig(
         source: HostCatalogConfig.defaultSource,
         channel: "prod",
+        authUser: "",
+        authPassword: "",
         autoCheck: true,
         wifiOnlyAutoDownload: true,
         autoInstall: false
@@ -114,6 +118,36 @@ struct HostCatalogConfig: Codable, Equatable {
     static var defaultSource: String {
         let value = Bundle.main.object(forInfoDictionaryKey: "DTHostCatalogURL") as? String
         return (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    init(
+        source: String,
+        channel: String,
+        authUser: String,
+        authPassword: String,
+        autoCheck: Bool,
+        wifiOnlyAutoDownload: Bool,
+        autoInstall: Bool
+    ) {
+        self.source = source
+        self.channel = channel
+        self.authUser = authUser
+        self.authPassword = authPassword
+        self.autoCheck = autoCheck
+        self.wifiOnlyAutoDownload = wifiOnlyAutoDownload
+        self.autoInstall = autoInstall
+    }
+
+    /// Tolerate configs persisted before auth fields existed.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        source = try container.decodeIfPresent(String.self, forKey: .source) ?? Self.defaultSource
+        channel = try container.decodeIfPresent(String.self, forKey: .channel) ?? "prod"
+        authUser = try container.decodeIfPresent(String.self, forKey: .authUser) ?? ""
+        authPassword = try container.decodeIfPresent(String.self, forKey: .authPassword) ?? ""
+        autoCheck = try container.decodeIfPresent(Bool.self, forKey: .autoCheck) ?? true
+        wifiOnlyAutoDownload = try container.decodeIfPresent(Bool.self, forKey: .wifiOnlyAutoDownload) ?? true
+        autoInstall = try container.decodeIfPresent(Bool.self, forKey: .autoInstall) ?? false
     }
 }
 
@@ -231,13 +265,13 @@ private final class HostFileDownloader: NSObject, URLSessionDownloadDelegate, @u
         self.progress = progress
     }
 
-    func start(url: URL) async throws {
+    func start(request: URLRequest) async throws {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 600
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         self.session = session
-        let task = session.downloadTask(with: url)
+        let task = session.downloadTask(with: request)
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             lock.lock()
@@ -368,6 +402,28 @@ final class HostCatalogCenter: ObservableObject {
         updateConfig { $0.source = HostCatalogConfig.defaultSource }
     }
 
+    /// Preemptive HTTP Basic credential for the private site (宝塔「密码访问」).
+    var authHeaderValue: String? {
+        Self.basicAuthValue(config.authUser, config.authPassword)
+    }
+
+    static func basicAuthValue(_ rawUser: String, _ rawPassword: String) -> String? {
+        let user = rawUser.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !user.isEmpty else { return nil }
+        let credential = "\(user):\(rawPassword)"
+        let data = Data(credential.utf8)
+        return "Basic " + data.base64EncodedString()
+    }
+
+    private func authorizedRequest(_ url: URL, timeout: TimeInterval) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        if let auth = authHeaderValue {
+            request.setValue(auth, forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
     static func makeCatalogURL(source: String, channel: String) -> URL? {
         let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -404,8 +460,7 @@ final class HostCatalogCenter: ObservableObject {
         if case .syncing = syncState { return }
 
         syncState = .syncing
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 20
+        var request = authorizedRequest(url, timeout: 20)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if !force, let etag, !etag.isEmpty {
             request.setValue(etag, forHTTPHeaderField: "If-None-Match")
@@ -520,7 +575,8 @@ final class HostCatalogCenter: ObservableObject {
         }
         guard let url = iconURL(for: app) else { return }
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let request = authorizedRequest(url, timeout: 20)
+            let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                 return
             }
@@ -551,12 +607,13 @@ final class HostCatalogCenter: ObservableObject {
         transfers[remote.appId] = .downloading(-1)
 
         do {
+            let downloadRequest = authorizedRequest(zipURL, timeout: 30)
             try await HostFileDownloader(destination: destination) { received, expected in
                 Task { @MainActor [weak self] in
                     let progress = expected > 0 ? Double(received) / Double(expected) : -1
                     self?.transfers[remote.appId] = .downloading(progress)
                 }
-            }.start(url: zipURL)
+            }.start(request: downloadRequest)
 
             if let expected = remote.sha256?.trimmingCharacters(in: .whitespacesAndNewlines),
                !expected.isEmpty {
@@ -648,16 +705,20 @@ final class HostCatalogCenter: ObservableObject {
 
         let start = Date()
         do {
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 15
+            var request = authorizedRequest(url, timeout: 15)
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
             let (data, response) = try await URLSession.shared.data(for: request)
             let elapsed = Int(Date().timeIntervalSince(start) * 1000)
             if let http = response as? HTTPURLResponse {
                 lines.append("HTTP：\(http.statusCode) · \(elapsed) ms")
                 if http.statusCode == 401 || http.statusCode == 403 {
-                    lines.append("鉴权：需要凭据（当前未提供）")
+                    lines.append(config.authUser.isEmpty
+                        ? "鉴权：站点要求凭据，请在设置里填写用户名和密码"
+                        : "鉴权：用户名或密码不正确（HTTP \(http.statusCode)）")
                 } else if (200..<300).contains(http.statusCode) {
-                    lines.append("鉴权：无需凭据或已通过")
+                    lines.append(config.authUser.isEmpty
+                        ? "鉴权：站点未启用密码访问（建议在宝塔开启）"
+                        : "鉴权：凭据有效")
                 }
                 if let type = http.value(forHTTPHeaderField: "Content-Type") {
                     lines.append("Content-Type：\(type)")

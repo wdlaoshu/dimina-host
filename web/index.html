@@ -132,8 +132,14 @@
         </article>
         <article class="deploy-card">
           <div class="step">4</div>
+          <h3>开启访问鉴权</h3>
+          <p>宝塔面板 → 网站 → 设置 → 密码访问，开启并设置账号密码，整站（含 apps.json 和 packages/）都会要求凭据。</p>
+          <code>宝塔「密码访问」/ Nginx Basic Auth</code>
+        </article>
+        <article class="deploy-card">
+          <div class="step">5</div>
           <h3>宿主填写应用源</h3>
-          <p>在 App 设置中填写目录地址；宿主只允许同域下载，避免任意地址注入。</p>
+          <p>在 App 设置中填写目录地址和鉴权用户名密码；宿主请求会自动携带凭据，且只允许同域下载。</p>
           <code>https://你的域名/apps.json</code>
         </article>
       </div>

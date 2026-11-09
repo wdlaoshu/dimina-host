@@ -1394,6 +1394,8 @@ private struct HostSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var sourceDraft = ""
     @State private var channelDraft = ""
+    @State private var authUserDraft = ""
+    @State private var authPasswordDraft = ""
     @State private var storage = HostStorageSummary()
     @State private var showDiagnostics = false
 
@@ -1477,6 +1479,8 @@ private struct HostSettingsSheet: View {
         .onAppear {
             sourceDraft = catalog.config.source
             channelDraft = catalog.config.channel
+            authUserDraft = catalog.config.authUser
+            authPasswordDraft = catalog.config.authPassword
             refreshStorage()
         }
         .sheet(isPresented: $showDiagnostics) {
@@ -1520,11 +1524,41 @@ private struct HostSettingsSheet: View {
                 .background(HostTheme.bg)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
+                HStack(spacing: 8) {
+                    Image(systemName: "person")
+                        .font(.system(size: 13))
+                        .foregroundColor(HostTheme.muted)
+                    TextField("访问用户名（未启用可留空）", text: $authUserDraft)
+                        .font(.system(size: 13))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 42)
+                .background(HostTheme.bg)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                HStack(spacing: 8) {
+                    Image(systemName: "lock")
+                        .font(.system(size: 13))
+                        .foregroundColor(HostTheme.muted)
+                    SecureField("访问密码", text: $authPasswordDraft)
+                        .font(.system(size: 13))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 42)
+                .background(HostTheme.bg)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
                 HStack(spacing: 10) {
                     Button {
                         catalog.updateConfig {
                             $0.source = sourceDraft
                             $0.channel = channelDraft
+                            $0.authUser = authUserDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                            $0.authPassword = authPasswordDraft
                         }
                         onRefreshNow()
                     } label: {
@@ -1541,7 +1575,13 @@ private struct HostSettingsSheet: View {
                         catalog.resetSource()
                         sourceDraft = catalog.config.source
                         channelDraft = "prod"
-                        catalog.updateConfig { $0.channel = "prod" }
+                        catalog.updateConfig {
+                            $0.channel = "prod"
+                            $0.authUser = ""
+                            $0.authPassword = ""
+                        }
+                        authUserDraft = ""
+                        authPasswordDraft = ""
                     } label: {
                         Text("恢复默认")
                             .font(.system(size: 13, weight: .medium))
@@ -1563,7 +1603,7 @@ private struct HostSettingsSheet: View {
                     .stroke(HostTheme.line, lineWidth: 1)
             )
 
-            Text("地址支持直接填写 apps.json，或填写站点根路径自动补全 /apps.json。安装包与图标必须与应用源同域。")
+            Text("地址支持直接填写 apps.json，或填写站点根路径自动补全 /apps.json。安装包与图标必须与应用源同域。若站点在宝塔开启了「密码访问」，填写对应的用户名和密码，目录、安装包、图标请求都会自动携带。")
                 .font(.system(size: 11))
                 .foregroundColor(HostTheme.muted)
                 .lineSpacing(3)
