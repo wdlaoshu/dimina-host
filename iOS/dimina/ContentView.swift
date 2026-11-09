@@ -17,6 +17,8 @@ struct ContentView: View {
     @State private var searchText = ""
     @FocusState private var searchFocused: Bool
     @State private var filter: HostFilter = .all
+    // 首页展示方式：三列图标网格 / 单列信息列表，记住上次选择。
+    @AppStorage("host.home.listLayout") private var listLayout = false
     @State private var selectedItem: HostHubItem?
     @State private var showSettings = false
     @State private var showUpdateCenter = false
@@ -291,7 +293,8 @@ struct ContentView: View {
         .background(HostTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
     }
 
     private var filterRow: some View {
@@ -318,6 +321,22 @@ struct ContentView: View {
                 .buttonStyle(.plain)
             }
             Spacer(minLength: 0)
+
+            // 切换网格/单列：图标展示的是「点完会变成的布局」。
+            Button {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    listLayout.toggle()
+                }
+            } label: {
+                Image(systemName: listLayout ? "square.grid.2x2" : "list.bullet")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(HostTheme.text)
+                    .frame(width: 32, height: 32)
+                    .background(HostTheme.surface)
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(listLayout ? "切换为网格布局" : "切换为单列布局")
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 4)
@@ -354,6 +373,12 @@ struct ContentView: View {
 
                 if visibleItems.isEmpty {
                     emptyState
+                } else if listLayout {
+                    VStack(spacing: 10) {
+                        ForEach(visibleItems) { item in
+                            appRow(item)
+                        }
+                    }
                 } else {
                     LazyVGrid(
                         columns: Array(
@@ -455,32 +480,35 @@ struct ContentView: View {
             Spacer(minLength: 8)
 
             Text(item.name)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(HostTheme.text)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .frame(height: 36, alignment: .topLeading)
-
-            Text(item.subtitle)
-                .font(.system(size: 10))
-                .foregroundColor(item.hasUpdate ? HostTheme.primary : HostTheme.muted)
                 .lineLimit(1)
-                .padding(.top, 4)
+                .multilineTextAlignment(.leading)
 
-            if let progress = transfer?.progress {
-                ProgressView(value: progress)
-                    .tint(HostTheme.primary)
-                    .padding(.top, 6)
-            } else if transfer?.isBusy == true {
-                ProgressView()
-                    .tint(HostTheme.primary)
-                    .scaleEffect(0.6, anchor: .leading)
-                    .padding(.top, 2)
+            // 下载/安装中把版本行换成进度，卡片高度保持不变。
+            if transfer?.isBusy == true {
+                Group {
+                    if let progress = transfer?.progress {
+                        ProgressView(value: progress)
+                            .tint(HostTheme.primary)
+                    } else {
+                        ProgressView()
+                            .tint(HostTheme.primary)
+                            .scaleEffect(0.6, anchor: .leading)
+                    }
+                }
+                .padding(.top, 8)
+            } else {
+                Text(item.subtitle)
+                    .font(.system(size: 10))
+                    .foregroundColor(item.hasUpdate ? HostTheme.primary : HostTheme.muted)
+                    .lineLimit(1)
+                    .padding(.top, 4)
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: 152)
+        .frame(height: 116)
         .background(HostTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
@@ -494,13 +522,61 @@ struct ContentView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            if item.canOpen && !item.hasUpdate {
-                open(item)
-            } else {
-                selectedItem = item
-            }
+            activate(item)
         }
         .onLongPressGesture(minimumDuration: 0.35) {
+            selectedItem = item
+        }
+    }
+
+    /// 单列模式：图标 + 名称/版本 + 右侧状态，名称可以完整占一行。
+    private func appRow(_ item: HostHubItem) -> some View {
+        let transfer = catalog.transfers[item.appId]
+        return HStack(spacing: 12) {
+            appIcon(item, size: 48, corner: 15, fontSize: 21)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(HostTheme.text)
+                    .lineLimit(1)
+                Text(item.subtitle)
+                    .font(.system(size: 10))
+                    .foregroundColor(item.hasUpdate ? HostTheme.primary : HostTheme.muted)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            statusBadge(item, transfer: transfer)
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 72)
+        .background(HostTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(
+                    item.hasUpdate
+                        ? HostTheme.primary.opacity(0.35)
+                        : Color.black.opacity(0.035),
+                    lineWidth: 1
+                )
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            activate(item)
+        }
+        .onLongPressGesture(minimumDuration: 0.35) {
+            selectedItem = item
+        }
+    }
+
+    private func activate(_ item: HostHubItem) {
+        if item.canOpen && !item.hasUpdate {
+            open(item)
+        } else {
             selectedItem = item
         }
     }

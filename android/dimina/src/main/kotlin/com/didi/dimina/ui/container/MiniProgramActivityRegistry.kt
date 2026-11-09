@@ -33,6 +33,10 @@ internal class MiniProgramActivityRegistry<T> {
     @Synchronized
     fun snapshot(appId: String): List<T> = activitiesByAppId[appId]?.toList().orEmpty()
 
+    /** 当前仍有存活页面的 appId 快照，供宿主的实例切换器枚举。 */
+    @Synchronized
+    fun appIds(): List<String> = activitiesByAppId.keys.toList()
+
     fun closeEveryApp(close: (T) -> Unit) {
         val activities = synchronized(this) {
             val snapshot = activitiesByAppId.values.flatMap { it.toList() }

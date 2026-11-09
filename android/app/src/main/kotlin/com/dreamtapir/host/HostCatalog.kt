@@ -80,6 +80,8 @@ data class HostCatalogConfig(
     val autoInstall: Boolean = false,
     /** 小程序调试面板（vConsole）开关，默认关闭，需要时在设置里打开。 */
     val debugEnabled: Boolean = false,
+    /** 首页单列列表布局；默认 false 表示三列图标网格。 */
+    val listLayout: Boolean = false,
 ) {
     companion object {
         val Default = HostCatalogConfig()
@@ -172,6 +174,7 @@ object HostCatalogStore {
             wifiOnlyAutoDownload = prefs.getBoolean("wifi_only", true),
             autoInstall = prefs.getBoolean("auto_install", false),
             debugEnabled = prefs.getBoolean("debug_enabled", false),
+            listLayout = prefs.getBoolean("list_layout", false),
         )
     }
 
@@ -186,6 +189,7 @@ object HostCatalogStore {
             .putBoolean("wifi_only", config.wifiOnlyAutoDownload)
             .putBoolean("auto_install", config.autoInstall)
             .putBoolean("debug_enabled", config.debugEnabled)
+            .putBoolean("list_layout", config.listLayout)
             .apply()
     }
 

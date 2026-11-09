@@ -20,6 +20,19 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
+ * 「切换小程序」用的运行中实例快照。
+ *
+ * @param lastActiveAt 最近一次可见/切回的时间（[android.os.SystemClock.elapsedRealtime]），仅用于排序。
+ */
+data class RunningMiniProgram(
+    val appId: String,
+    val name: String,
+    val iconPath: String?,
+    val isForeground: Boolean,
+    val lastActiveAt: Long,
+)
+
+/**
  * Author: Doslin
  */
 class Dimina private constructor(context: Context) {
@@ -229,6 +242,26 @@ class Dimina private constructor(context: Context) {
         }
         DiminaActivity.destroyAllMiniProgramsFromHost()
         MiniApp.getInstance().clearAll()
+    }
+
+    /**
+     * 当前仍在运行的小程序实例，前台实例排第一，其余按最近一次可见时间倒序。
+     * 供宿主的实例切换器 / 胶囊菜单枚举，不改变任何运行时状态。必须调用在主线程。
+     */
+    @MainThread
+    fun runningMiniPrograms(): List<RunningMiniProgram> =
+        DiminaActivity.runningMiniProgramsFromHost()
+
+    /**
+     * 把已保留在后台的小程序切回前台，不重建运行时。仅多任务模式支持。
+     *
+     * @return `true` 表示任务已被移动到前台。
+     */
+    @MainThread
+    fun showMiniProgram(appId: String): Boolean {
+        val normalizedAppId = appId.trim()
+        if (normalizedAppId.isEmpty()) return false
+        return DiminaActivity.showMiniProgramFromHost(normalizedAppId)
     }
 
     fun isMultiTaskEnabled(): Boolean = config.enableMultiTask

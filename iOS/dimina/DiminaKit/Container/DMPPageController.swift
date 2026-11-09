@@ -45,8 +45,10 @@ public class DMPPageController: UIViewController {
     private var homeButtonLeadingToEdge: NSLayoutConstraint?
     private var homeButtonLeadingAfterBack: NSLayoutConstraint?
     private var miniProgramMenuContainerView: UIView?
+    private var miniProgramSwitcherContainerView: UIView?
     // 菜单遮罩挂在共享的 navigationController.view 上，需要 tag 才能跨页面找回并清理
     private static let miniProgramMenuTag = 0x4D50_0001
+    private static let miniProgramSwitcherTag = 0x4D50_0002
     private var isClosingMiniProgram = false
     private var webViewTopToNavigationConstraint: NSLayoutConstraint?
     private var webViewTopToViewConstraint: NSLayoutConstraint?
@@ -692,13 +694,18 @@ public class DMPPageController: UIViewController {
             image: UIImage(systemName: "arrow.clockwise", withConfiguration: symbolConfiguration),
             action: #selector(miniProgramMenuReenterTapped)
         )
+        let switchItem = makeMiniProgramMenuItem(
+            title: "切换",
+            image: UIImage(systemName: "square.on.square", withConfiguration: symbolConfiguration),
+            action: #selector(miniProgramMenuSwitchTapped)
+        )
         let closeItem = makeMiniProgramMenuItem(
             title: "关闭",
             image: UIImage(systemName: "xmark", withConfiguration: symbolConfiguration),
             action: #selector(miniProgramMenuCloseTapped)
         )
 
-        let actionStack = UIStackView(arrangedSubviews: [reenterItem, closeItem])
+        let actionStack = UIStackView(arrangedSubviews: [reenterItem, switchItem, closeItem])
         actionStack.translatesAutoresizingMaskIntoConstraints = false
         actionStack.axis = .horizontal
         actionStack.alignment = .top
@@ -864,6 +871,290 @@ public class DMPPageController: UIViewController {
     @objc private func miniProgramMenuCloseTapped() {
         dismissMiniProgramMenu(animated: true)
         closeMiniProgramFromCapsule()
+    }
+
+    // MARK: - Mini Program Switcher
+
+    @objc private func miniProgramMenuSwitchTapped() {
+        dismissMiniProgramMenu(animated: true)
+        guard DMPAppManager.sharedInstance().runningMiniPrograms().count > 1 else {
+            ToastManager.shared.showToast(title: "当前只有一个小程序在运行", type: .none)
+            return
+        }
+        showMiniProgramSwitcher()
+    }
+
+    /// 卡片式实例切换器：列出运行中的小程序，点击切回，非当前实例可直接关闭。
+    private func showMiniProgramSwitcher() {
+        guard miniProgramSwitcherContainerView == nil else { return }
+
+        let apps = DMPAppManager.sharedInstance().runningMiniPrograms()
+        guard apps.count > 1 else { return }
+
+        let presentationView: UIView = navigationController?.view ?? parent?.view ?? view
+        presentationView.subviews
+            .filter { $0.tag == DMPPageController.miniProgramSwitcherTag }
+            .forEach { $0.removeFromSuperview() }
+
+        let overlay = UIControl()
+        overlay.tag = DMPPageController.miniProgramSwitcherTag
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        overlay.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+        overlay.alpha = 0
+        overlay.addTarget(self, action: #selector(dismissMiniProgramSwitcherFromOverlay), for: .touchUpInside)
+
+        let sheetView = UIView()
+        sheetView.translatesAutoresizingMaskIntoConstraints = false
+        sheetView.backgroundColor = .systemBackground
+        sheetView.layer.cornerRadius = 20
+        if #available(iOS 11.0, *) {
+            sheetView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        }
+        sheetView.layer.masksToBounds = true
+
+        let titleLabel = UILabel()
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.text = "切换小程序"
+        titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+        titleLabel.textColor = .label
+
+        let countLabel = UILabel()
+        countLabel.translatesAutoresizingMaskIntoConstraints = false
+        countLabel.text = "\(apps.count) 个正在运行 · 切回不重载"
+        countLabel.font = .systemFont(ofSize: 13)
+        countLabel.textColor = .secondaryLabel
+
+        let headerStack = UIStackView(arrangedSubviews: [titleLabel, countLabel])
+        headerStack.translatesAutoresizingMaskIntoConstraints = false
+        headerStack.axis = .vertical
+        headerStack.spacing = 2
+
+        let listStack = UIStackView()
+        listStack.translatesAutoresizingMaskIntoConstraints = false
+        listStack.axis = .vertical
+        listStack.spacing = 8
+        apps.forEach { listStack.addArrangedSubview(makeMiniProgramSwitcherRow($0)) }
+
+        let bottomDivider = UIView()
+        bottomDivider.translatesAutoresizingMaskIntoConstraints = false
+        bottomDivider.backgroundColor = .separator
+
+        let cancelButton = UIButton(type: .system)
+        cancelButton.translatesAutoresizingMaskIntoConstraints = false
+        cancelButton.setTitle("取消", for: .normal)
+        cancelButton.setTitleColor(.systemBlue, for: .normal)
+        cancelButton.titleLabel?.font = .systemFont(ofSize: 17)
+        cancelButton.addTarget(self, action: #selector(dismissMiniProgramSwitcherFromOverlay), for: .touchUpInside)
+
+        presentationView.addSubview(overlay)
+        overlay.addSubview(sheetView)
+        sheetView.addSubview(headerStack)
+        sheetView.addSubview(listStack)
+        sheetView.addSubview(bottomDivider)
+        sheetView.addSubview(cancelButton)
+
+        let bottomInset = presentationView.safeAreaInsets.bottom
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: presentationView.topAnchor),
+            overlay.leadingAnchor.constraint(equalTo: presentationView.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: presentationView.trailingAnchor),
+            overlay.bottomAnchor.constraint(equalTo: presentationView.bottomAnchor),
+
+            sheetView.leadingAnchor.constraint(equalTo: overlay.leadingAnchor),
+            sheetView.trailingAnchor.constraint(equalTo: overlay.trailingAnchor),
+            sheetView.bottomAnchor.constraint(equalTo: overlay.bottomAnchor),
+
+            headerStack.topAnchor.constraint(equalTo: sheetView.topAnchor, constant: 22),
+            headerStack.leadingAnchor.constraint(equalTo: sheetView.leadingAnchor, constant: 24),
+            headerStack.trailingAnchor.constraint(lessThanOrEqualTo: sheetView.trailingAnchor, constant: -24),
+
+            listStack.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 16),
+            listStack.leadingAnchor.constraint(equalTo: sheetView.leadingAnchor, constant: 20),
+            listStack.trailingAnchor.constraint(equalTo: sheetView.trailingAnchor, constant: -20),
+
+            bottomDivider.topAnchor.constraint(equalTo: listStack.bottomAnchor, constant: 16),
+            bottomDivider.leadingAnchor.constraint(equalTo: sheetView.leadingAnchor),
+            bottomDivider.trailingAnchor.constraint(equalTo: sheetView.trailingAnchor),
+            bottomDivider.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale),
+
+            cancelButton.topAnchor.constraint(equalTo: bottomDivider.bottomAnchor),
+            cancelButton.leadingAnchor.constraint(equalTo: sheetView.leadingAnchor),
+            cancelButton.trailingAnchor.constraint(equalTo: sheetView.trailingAnchor),
+            cancelButton.heightAnchor.constraint(equalToConstant: 56),
+            cancelButton.bottomAnchor.constraint(equalTo: sheetView.bottomAnchor, constant: -bottomInset),
+        ])
+
+        miniProgramSwitcherContainerView = overlay
+        presentationView.bringSubviewToFront(overlay)
+
+        sheetView.transform = CGAffineTransform(translationX: 0, y: 320)
+        presentationView.layoutIfNeeded()
+        UIView.animate(withDuration: 0.26, delay: 0, options: .curveEaseOut) {
+            overlay.alpha = 1
+            sheetView.transform = .identity
+        }
+    }
+
+    private func makeMiniProgramSwitcherRow(_ item: DMPRunningMiniProgram) -> UIControl {
+        let row = UIControl()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.backgroundColor = .secondarySystemBackground
+        row.layer.cornerRadius = 14
+        row.accessibilityIdentifier = item.appId
+        row.addTarget(self, action: #selector(miniProgramSwitcherRowTapped(_:)), for: .touchUpInside)
+
+        let iconContainer = UIView()
+        iconContainer.translatesAutoresizingMaskIntoConstraints = false
+        iconContainer.backgroundColor = .systemBackground
+        iconContainer.layer.cornerRadius = 10
+        iconContainer.clipsToBounds = true
+        iconContainer.isUserInteractionEnabled = false
+
+        if let iconImage = item.iconImage {
+            let iconView = UIImageView(image: iconImage)
+            iconView.translatesAutoresizingMaskIntoConstraints = false
+            iconView.contentMode = .scaleAspectFill
+            iconContainer.addSubview(iconView)
+            NSLayoutConstraint.activate([
+                iconView.topAnchor.constraint(equalTo: iconContainer.topAnchor),
+                iconView.bottomAnchor.constraint(equalTo: iconContainer.bottomAnchor),
+                iconView.leadingAnchor.constraint(equalTo: iconContainer.leadingAnchor),
+                iconView.trailingAnchor.constraint(equalTo: iconContainer.trailingAnchor),
+            ])
+        } else {
+            let letterLabel = UILabel()
+            letterLabel.translatesAutoresizingMaskIntoConstraints = false
+            letterLabel.text = String(item.name.prefix(1)).isEmpty ? "小" : String(item.name.prefix(1))
+            letterLabel.font = .systemFont(ofSize: 16, weight: .medium)
+            letterLabel.textColor = .secondaryLabel
+            iconContainer.addSubview(letterLabel)
+            NSLayoutConstraint.activate([
+                letterLabel.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+                letterLabel.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+            ])
+        }
+
+        let nameLabel = UILabel()
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+        nameLabel.text = item.name
+        nameLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        nameLabel.textColor = .label
+        nameLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.isUserInteractionEnabled = false
+
+        row.addSubview(iconContainer)
+        row.addSubview(nameLabel)
+
+        let trailingView: UIView
+        if item.isActive {
+            let badge = UILabel()
+            badge.translatesAutoresizingMaskIntoConstraints = false
+            badge.text = "当前"
+            badge.font = .systemFont(ofSize: 12, weight: .medium)
+            badge.textColor = .systemBlue
+            badge.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.12)
+            badge.textAlignment = .center
+            badge.layer.cornerRadius = 11
+            badge.layer.masksToBounds = true
+            badge.isUserInteractionEnabled = false
+            trailingView = badge
+            NSLayoutConstraint.activate([
+                badge.widthAnchor.constraint(equalToConstant: 44),
+                badge.heightAnchor.constraint(equalToConstant: 22),
+            ])
+        } else {
+            let closeButton = UIButton(type: .system)
+            closeButton.translatesAutoresizingMaskIntoConstraints = false
+            closeButton.setImage(
+                UIImage(systemName: "xmark.circle.fill",
+                        withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)),
+                for: .normal
+            )
+            closeButton.tintColor = .tertiaryLabel
+            closeButton.accessibilityIdentifier = item.appId
+            closeButton.accessibilityLabel = "关闭 \(item.name)"
+            closeButton.addTarget(self, action: #selector(miniProgramSwitcherCloseTapped(_:)), for: .touchUpInside)
+            trailingView = closeButton
+            NSLayoutConstraint.activate([
+                closeButton.widthAnchor.constraint(equalToConstant: 40),
+                closeButton.heightAnchor.constraint(equalToConstant: 40),
+            ])
+        }
+        row.addSubview(trailingView)
+
+        NSLayoutConstraint.activate([
+            row.heightAnchor.constraint(equalToConstant: 64),
+
+            iconContainer.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
+            iconContainer.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            iconContainer.widthAnchor.constraint(equalToConstant: 40),
+            iconContainer.heightAnchor.constraint(equalToConstant: 40),
+
+            nameLabel.leadingAnchor.constraint(equalTo: iconContainer.trailingAnchor, constant: 12),
+            nameLabel.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingView.leadingAnchor, constant: -12),
+
+            trailingView.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            trailingView.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+        ])
+
+        return row
+    }
+
+    @objc private func miniProgramSwitcherRowTapped(_ sender: UIControl) {
+        guard let appId = sender.accessibilityIdentifier else { return }
+        dismissMiniProgramSwitcher(animated: false)
+        Task { @MainActor [weak self] in
+            do {
+                try await DMPAppManager.sharedInstance().switchToMiniProgram(appId: appId)
+            } catch {
+                DMPLogger.debug("switch mini program rejected: \(error.localizedDescription)")
+                if self?.view.window != nil {
+                    ToastManager.shared.showToast(title: "切换失败", type: .error)
+                }
+            }
+        }
+    }
+
+    @objc private func miniProgramSwitcherCloseTapped(_ sender: UIButton) {
+        guard let appId = sender.accessibilityIdentifier else { return }
+        sender.isEnabled = false
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                if let runningApp = DMPAppManager.sharedInstance().existApp(appId: appId) {
+                    try await runningApp.closeMiniProgram()
+                }
+            } catch {
+                DMPLogger.debug("close mini program rejected: \(error.localizedDescription)")
+            }
+            guard self.view.window != nil else { return }
+            self.dismissMiniProgramSwitcher(animated: false)
+            if DMPAppManager.sharedInstance().runningMiniPrograms().count > 1 {
+                self.showMiniProgramSwitcher()
+            }
+        }
+    }
+
+    @objc private func dismissMiniProgramSwitcherFromOverlay() {
+        dismissMiniProgramSwitcher(animated: true)
+    }
+
+    private func dismissMiniProgramSwitcher(animated: Bool) {
+        guard let overlay = miniProgramSwitcherContainerView else { return }
+        miniProgramSwitcherContainerView = nil
+
+        guard animated, let sheetView = overlay.subviews.first else {
+            overlay.removeFromSuperview()
+            return
+        }
+
+        UIView.animate(withDuration: 0.2, animations: {
+            overlay.alpha = 0
+            sheetView.transform = CGAffineTransform(translationX: 0, y: sheetView.bounds.height)
+        }) { _ in
+            overlay.removeFromSuperview()
+        }
     }
 
     // Set navigation bar style
@@ -1041,6 +1332,7 @@ public class DMPPageController: UIViewController {
 
         // 页面离开时必须收掉胶囊菜单，否则遮罩留在共享的导航容器上会一直盖住后续页面
         dismissMiniProgramMenu(animated: false)
+        dismissMiniProgramSwitcher(animated: false)
         
         // Notify lifecycle management when page completely disappears
         if isMovingFromParent && navigator?.isRetainedInBackground != true {

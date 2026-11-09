@@ -59,6 +59,23 @@ enum DMPRetentionClock {
     static func now() -> TimeInterval { Double(mach_continuous_time()) * secondsPerTick }
 }
 
+/// 「切换小程序」用的运行中实例快照。`isActive` 标记此刻真正占据屏幕的那一个。
+public struct DMPRunningMiniProgram: Identifiable {
+    public let appId: String
+    public let name: String
+    public let iconImage: UIImage?
+    public let isActive: Bool
+
+    public var id: String { appId }
+
+    public init(appId: String, name: String, iconImage: UIImage?, isActive: Bool) {
+        self.appId = appId
+        self.name = name
+        self.iconImage = iconImage
+        self.isActive = isActive
+    }
+}
+
 public struct DMPRetentionPolicy {
     public let maxBackgroundApps: Int
     public let backgroundTimeoutMs: Int
@@ -322,6 +339,61 @@ public class DMPAppManager {
     func existApp(appId: String) -> DMPApp? {
         return withStateLock {
             appPools.values.first(where: { $0.getAppId() == appId })
+        }
+    }
+
+    /// 当前仍在运行的小程序实例，前台实例永远排第一，其余按最近一次切入后台的时间倒序。
+    /// 供宿主的实例切换器 / 胶囊菜单使用，不改变任何运行时状态。
+    @MainActor
+    public func runningMiniPrograms() -> [DMPRunningMiniProgram] {
+        let apps = withStateLock { Array(appPools.values) }
+        let active = apps.first { $0.getNavigator()?.isActiveNavigationOwner() == true }
+        let hidden = apps.filter { $0 !== active }.sorted { lhs, rhs in
+            let lhsSince = retainedSince[lhs.getAppIndex()] ?? 0
+            let rhsSince = retainedSince[rhs.getAppIndex()] ?? 0
+            return lhsSince == rhsSince
+                ? lhs.getAppIndex() < rhs.getAppIndex()
+                : lhsSince > rhsSince
+        }
+        return ([active].compactMap { $0 } + hidden).map { app in
+            let config = app.getAppConfig()
+            return DMPRunningMiniProgram(
+                appId: app.getAppId(),
+                name: config?.appName ?? app.getAppId(),
+                iconImage: config?.iconImage,
+                isActive: app === active
+            )
+        }
+    }
+
+    /// 切到另一个已保留的实例：先把当前实例隐藏（页面栈和 WebView 原样保留），
+    /// 再让目标实例把保留的控制器挂回共享的 navigationController。
+    /// 两侧都不重启运行时；失败时把当前实例恢复回前台，避免把用户丢在宿主首页。
+    @MainActor
+    public func switchToMiniProgram(appId rawAppId: String) async throws {
+        let appId = rawAppId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !appId.isEmpty else {
+            throw DMPMiniProgramNavigationError.invalidAppId
+        }
+        try await withMiniProgramOperation {
+            guard let target = existApp(appId: appId),
+                  let targetNavigator = target.getNavigator() else {
+                throw DMPMiniProgramNavigationError.sourceUnavailable
+            }
+            if targetNavigator.isActiveNavigationOwner() { return }
+
+            guard let current = activePresentedApp(),
+                  let currentNavigator = current.getNavigator() else {
+                if targetNavigator.resumeRetainedMiniProgram() { return }
+                throw DMPMiniProgramNavigationError.sourceNotPresented
+            }
+            try await performHideMiniProgram(current)
+            if targetNavigator.resumeRetainedMiniProgram() { return }
+            // 目标可能正是被 hide 顺带恢复的 opener，此时它已经是导航 owner。
+            if targetNavigator.isActiveNavigationOwner() { return }
+            // 目标既没有保留控制器也不是 owner，无法安全接管，恢复原实例。
+            _ = currentNavigator.resumeRetainedMiniProgram()
+            throw DMPMiniProgramNavigationError.sourceNotPresented
         }
     }
     
@@ -632,20 +704,26 @@ public class DMPAppManager {
     @MainActor
     func hideMiniProgram(_ app: DMPApp) async throws {
         try await withMiniProgramOperation {
-            guard getApp(appIndex: app.getAppIndex()) === app else {
-                throw DMPMiniProgramNavigationError.sourceUnavailable
-            }
-            if app.getNavigator()?.isRetainedInBackground == true { return }
-            guard let navigator = app.getNavigator(), navigator.isActiveNavigationOwner() else {
-                throw DMPMiniProgramNavigationError.sourceNotPresented
-            }
-            guard !navigator.hasPageRouteOperationInProgress() else {
-                throw DMPMiniProgramNavigationError.operationInProgress
-            }
-            let opener = removeOpenerContext(for: app.getAppIndex())
-            await navigator.hideMiniProgram()
-            if let opener { restoreOpener(opener, extraData: nil) }
+            try await performHideMiniProgram(app)
         }
+    }
+
+    /// 已持有 [isMiniProgramOperationInProgress] 时使用的无锁版本，供跨实例切换复用。
+    @MainActor
+    private func performHideMiniProgram(_ app: DMPApp) async throws {
+        guard getApp(appIndex: app.getAppIndex()) === app else {
+            throw DMPMiniProgramNavigationError.sourceUnavailable
+        }
+        if app.getNavigator()?.isRetainedInBackground == true { return }
+        guard let navigator = app.getNavigator(), navigator.isActiveNavigationOwner() else {
+            throw DMPMiniProgramNavigationError.sourceNotPresented
+        }
+        guard !navigator.hasPageRouteOperationInProgress() else {
+            throw DMPMiniProgramNavigationError.operationInProgress
+        }
+        let opener = removeOpenerContext(for: app.getAppIndex())
+        await navigator.hideMiniProgram()
+        if let opener { restoreOpener(opener, extraData: nil) }
     }
 
     @MainActor

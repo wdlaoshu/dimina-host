@@ -17,8 +17,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -87,6 +89,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -380,7 +385,11 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                     recentCount = recentIds.size,
                     allCount = hub.size,
                     updateCount = updates.size,
+                    listLayout = catalog.config.listLayout,
                     onSelect = { filter = it },
+                    onToggleLayout = {
+                        catalog.updateConfig { it.copy(listLayout = !it.listLayout) }
+                    },
                 )
 
                 if (!network.connected) {
@@ -388,7 +397,7 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                 }
 
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
+                    columns = GridCells.Fixed(if (catalog.config.listLayout) 1 else 3),
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(top = 4.dp)
@@ -398,7 +407,7 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                         },
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 28.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (catalog.config.listLayout) 10.dp else 12.dp),
                 ) {
                     if (updates.isNotEmpty() && filter != HostFilter.Updates) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
@@ -433,20 +442,31 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                             )
                         }
                     } else {
+                        val onActivate = { item: HostHubItem ->
+                            if (item.canOpen && !item.hasUpdate && item.local != null) {
+                                openApp(item.local)
+                            } else {
+                                selectedItem = item
+                            }
+                        }
                         gridItems(visible, key = { it.appId }) { item ->
-                            AppGridCard(
-                                item = item,
-                                bitmap = catalog.icons[item.appId],
-                                transfer = catalog.transfers[item.appId],
-                                onOpen = {
-                                    if (item.canOpen && !item.hasUpdate && item.local != null) {
-                                        openApp(item.local)
-                                    } else {
-                                        selectedItem = item
-                                    }
-                                },
-                                onDetails = { selectedItem = item },
-                            )
+                            if (catalog.config.listLayout) {
+                                AppListRow(
+                                    item = item,
+                                    bitmap = catalog.icons[item.appId],
+                                    transfer = catalog.transfers[item.appId],
+                                    onOpen = { onActivate(item) },
+                                    onDetails = { selectedItem = item },
+                                )
+                            } else {
+                                AppGridCard(
+                                    item = item,
+                                    bitmap = catalog.icons[item.appId],
+                                    transfer = catalog.transfers[item.appId],
+                                    onOpen = { onActivate(item) },
+                                    onDetails = { selectedItem = item },
+                                )
+                            }
                         }
                     }
                 }
@@ -676,7 +696,7 @@ private fun HostSearchBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 12.dp)
             .height(48.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(HostSurface)
@@ -719,7 +739,9 @@ private fun FilterRow(
     recentCount: Int,
     allCount: Int,
     updateCount: Int,
+    listLayout: Boolean,
     onSelect: (HostFilter) -> Unit,
+    onToggleLayout: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -756,6 +778,48 @@ private fun FilterRow(
                         color = if (selected) Color.White.copy(alpha = 0.8f) else HostMuted,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        LayoutToggle(listLayout = listLayout, onToggle = onToggleLayout)
+    }
+}
+
+/** 首页网格/单列切换，图标表示「点完会变成的布局」。 */
+@Composable
+private fun LayoutToggle(listLayout: Boolean, onToggle: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(HostSurface)
+            .clickable(onClick = onToggle),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(14.dp)) {
+            if (listLayout) {
+                // 当前单列，目标图标是网格。
+                val cell = size.width * 0.38f
+                val far = size.width - cell
+                listOf(0f to 0f, far to 0f, 0f to far, far to far).forEach { (x, y) ->
+                    drawRoundRect(
+                        color = HostText,
+                        topLeft = Offset(x, y),
+                        size = Size(cell, cell),
+                        cornerRadius = CornerRadius(cell * 0.25f),
+                    )
+                }
+            } else {
+                // 当前网格，目标图标是单列。
+                val thickness = size.height / 7f
+                listOf(0f, (size.height - thickness) / 2f, size.height - thickness).forEach { y ->
+                    drawRoundRect(
+                        color = HostText,
+                        topLeft = Offset(0f, y),
+                        size = Size(size.width, thickness),
+                        cornerRadius = CornerRadius(thickness / 2f),
                     )
                 }
             }
@@ -843,7 +907,7 @@ private fun AppGridCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(152.dp)
+            .height(116.dp)
             .clip(RoundedCornerShape(22.dp))
             .combinedClickable(onClick = onOpen, onLongClick = onDetails),
         color = HostSurface,
@@ -864,24 +928,78 @@ private fun AppGridCard(
             Text(
                 text = item.name,
                 color = HostText,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 lineHeight = 18.sp,
             )
-            Text(
-                text = item.subtitle,
-                color = if (item.hasUpdate) HostPrimary else HostMuted,
-                fontSize = 10.sp,
-                maxLines = 1,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-            val progress = transfer?.progress
-            when {
-                progress != null -> ProgressBar(progress.toFloat(), Modifier.padding(top = 6.dp))
-                transfer?.isBusy == true -> ProgressBar(null, Modifier.padding(top = 6.dp))
+            // 下载/安装中把版本行换成进度条，卡片高度保持不变。
+            if (transfer?.isBusy == true) {
+                ProgressBar(transfer?.progress?.toFloat(), Modifier.padding(top = 8.dp))
+            } else {
+                Text(
+                    text = item.subtitle,
+                    color = if (item.hasUpdate) HostPrimary else HostMuted,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
+        }
+    }
+}
+
+/** 单列模式：图标 + 名称/版本 + 右侧状态，名称可以完整占一行。 */
+@Composable
+private fun AppListRow(
+    item: HostHubItem,
+    bitmap: Bitmap?,
+    transfer: HostTransferState?,
+    onOpen: () -> Unit,
+    onDetails: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(72.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .combinedClickable(onClick = onOpen, onLongClick = onDetails),
+        color = HostSurface,
+        shape = RoundedCornerShape(22.dp),
+        shadowElevation = 1.dp,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AppIcon(name = item.name, bitmap = bitmap, size = 48, corner = 15, fontSize = 21)
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp),
+            ) {
+                Text(
+                    text = item.name,
+                    color = HostText,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = item.subtitle,
+                    color = if (item.hasUpdate) HostPrimary else HostMuted,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            StatusBadge(item = item, transfer = transfer)
         }
     }
 }

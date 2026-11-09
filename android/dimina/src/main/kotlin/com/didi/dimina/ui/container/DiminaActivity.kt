@@ -60,6 +60,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -97,6 +98,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -106,6 +108,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.didi.dimina.Dimina
+import com.didi.dimina.RunningMiniProgram
 import com.didi.dimina.api.device.ScanCodeOptions
 import com.didi.dimina.bean.AppConfig
 import com.didi.dimina.bean.BridgeOptions
@@ -174,6 +177,9 @@ class DiminaActivity : ComponentActivity() {
     // State for ActionSheet
     private val showActionSheet = mutableStateOf(false)
     private val showMiniProgramMenu = mutableStateOf(false)
+    private val showMiniProgramSwitcher = mutableStateOf(false)
+    // 关闭某个实例后强制重算切换器列表
+    private val switcherRevision = mutableIntStateOf(0)
     private var actionTextColor = "#000000"
     private var actionSheetOptions = listOf<String>()
     private var actionSheetCallback: ((Int) -> Unit)? = null
@@ -1703,6 +1709,11 @@ class DiminaActivity : ComponentActivity() {
                 }
             )
         }
+        val runningApps = if (showMiniProgramMenu.value || showMiniProgramSwitcher.value) {
+            rememberRunningMiniPrograms(switcherRevision.intValue)
+        } else {
+            emptyList()
+        }
         if (showMiniProgramMenu.value) {
             MiniProgramMenuSheet(
                 appName = miniProgram.name.ifBlank {
@@ -1712,6 +1723,12 @@ class DiminaActivity : ComponentActivity() {
                     showMiniProgramMenu.value = false
                     reenterMiniProgram()
                 },
+                onSwitchClick = {
+                    showMiniProgramMenu.value = false
+                    if (runningApps.size > 1) {
+                        showMiniProgramSwitcher.value = true
+                    }
+                },
                 onCloseClick = {
                     showMiniProgramMenu.value = false
                     hideMiniProgram()
@@ -1720,6 +1737,28 @@ class DiminaActivity : ComponentActivity() {
                     showMiniProgramMenu.value = false
                 }
             )
+        }
+        if (showMiniProgramSwitcher.value) {
+            if (runningApps.size <= 1) {
+                // 列表在关闭后收缩到只剩当前实例，直接收起
+                showMiniProgramSwitcher.value = false
+            } else {
+                MiniProgramSwitcherSheet(
+                    apps = runningApps,
+                    currentAppId = miniProgram.appId,
+                    onSelect = { appId ->
+                        showMiniProgramSwitcher.value = false
+                        Dimina.getInstance().showMiniProgram(appId)
+                    },
+                    onCloseApp = { appId ->
+                        Dimina.getInstance().closeMiniProgram(appId)
+                        switcherRevision.intValue++
+                    },
+                    onDismiss = {
+                        showMiniProgramSwitcher.value = false
+                    }
+                )
+            }
         }
         MediaPickerRoot(
             type = mediaType.value,
@@ -2027,6 +2066,7 @@ class DiminaActivity : ComponentActivity() {
 
     private fun dispatchMiniProgramShow() {
         retainedByHost = false
+        markMiniProgramActive(miniProgram.appId)
         miniApp.retentionVisibility(miniProgram.appId, true)
         val jsCore = miniApp.peekJsCore(miniProgram.appId)
         if (jsCore != null) {
@@ -2201,6 +2241,7 @@ class DiminaActivity : ComponentActivity() {
     private fun MiniProgramMenuSheet(
         appName: String,
         onReenterClick: () -> Unit,
+        onSwitchClick: () -> Unit,
         onCloseClick: () -> Unit,
         onDismiss: () -> Unit
     ) {
@@ -2264,6 +2305,13 @@ class DiminaActivity : ComponentActivity() {
                         modifier = Modifier.width(78.dp)
                     )
                     MiniProgramMenuItem(
+                        label = "切换\n小程序",
+                        icon = Icons.Filled.Menu,
+                        contentDescription = "切换小程序",
+                        onClick = onSwitchClick,
+                        modifier = Modifier.width(78.dp)
+                    )
+                    MiniProgramMenuItem(
                         label = "关闭小程序",
                         icon = Icons.Filled.Close,
                         contentDescription = "关闭小程序",
@@ -2321,6 +2369,149 @@ class DiminaActivity : ComponentActivity() {
                 lineHeight = 17.sp,
                 modifier = Modifier.padding(top = 8.dp)
             )
+        }
+    }
+
+    @Composable
+    private fun rememberRunningMiniPrograms(revision: Int): List<RunningMiniProgram> =
+        remember(revision) {
+            runCatching { Dimina.getInstance().runningMiniPrograms() }.getOrDefault(emptyList())
+        }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    private fun MiniProgramSwitcherSheet(
+        apps: List<RunningMiniProgram>,
+        currentAppId: String,
+        onSelect: (String) -> Unit,
+        onCloseApp: (String) -> Unit,
+        onDismiss: () -> Unit
+    ) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = onDismiss,
+            sheetState = sheetState,
+            shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
+            containerColor = Color.White,
+            dragHandle = {}
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp)) {
+                    Text(
+                        text = "切换小程序",
+                        fontSize = 18.sp,
+                        color = Color(0xFF202020),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "${apps.size} 个正在运行 · 切回不重载",
+                        fontSize = 13.sp,
+                        color = Color(0xFF9A9A9A),
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+                apps.forEach { app ->
+                    MiniProgramSwitcherRow(
+                        app = app,
+                        isCurrent = app.appId == currentAppId,
+                        onSelect = { onSelect(app.appId) },
+                        onClose = { onCloseApp(app.appId) },
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider(color = Color(0xFFEDEDED), thickness = 1.dp)
+                Text(
+                    text = "取消",
+                    fontSize = 18.sp,
+                    color = Color(0xFF576B95),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onDismiss)
+                        .padding(vertical = 18.dp)
+                )
+            }
+        }
+    }
+
+    @Composable
+    private fun MiniProgramSwitcherRow(
+        app: RunningMiniProgram,
+        isCurrent: Boolean,
+        onSelect: () -> Unit,
+        onClose: () -> Unit,
+        modifier: Modifier = Modifier
+    ) {
+        val icon = remember(app.iconPath) {
+            app.iconPath
+                ?.takeIf { File(it).isFile }
+                ?.let { BitmapFactory.decodeFile(it) }
+                ?.asImageBitmap()
+        }
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFFF6F6F6))
+                .clickable(onClick = onSelect)
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.White),
+                contentAlignment = Alignment.Center
+            ) {
+                if (icon != null) {
+                    Image(
+                        bitmap = icon,
+                        contentDescription = app.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Text(
+                        text = app.name.take(1).ifBlank { "小" },
+                        fontSize = 16.sp,
+                        color = Color(0xFF8A8A8A),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+            Text(
+                text = app.name,
+                fontSize = 15.sp,
+                color = Color(0xFF202020),
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 12.dp)
+            )
+            if (isCurrent) {
+                Text(
+                    text = "当前",
+                    fontSize = 12.sp,
+                    color = Color(0xFF576B95),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(Color(0x1F576B95))
+                        .padding(horizontal = 10.dp, vertical = 3.dp)
+                )
+            } else {
+                IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "关闭 ${app.name}",
+                        tint = Color(0xFFB0B0B0),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
         }
     }
 
@@ -2597,6 +2788,40 @@ class DiminaActivity : ComponentActivity() {
         private var hostGeneration = 0L
         private val pendingLaunches = mutableSetOf<String>()
         private val returnTasks = mutableMapOf<String, Int>()
+        // 切换器排序用：最近一次真正可见的时间，不参与任何生命周期判定。
+        private val lastActiveAt = mutableMapOf<String, Long>()
+
+        internal fun markMiniProgramActive(appId: String) {
+            lastActiveAt[appId] = SystemClock.elapsedRealtime()
+        }
+
+        /** 运行中实例快照（前台优先，其余按最近活跃倒序），见 [RunningMiniProgram]。 */
+        @androidx.annotation.MainThread
+        internal fun runningMiniProgramsFromHost(): List<RunningMiniProgram> {
+            return activityRegistry.appIds().mapNotNull { appId ->
+                val activity = findLiveActivity(appId) ?: return@mapNotNull null
+                val program = activity.getMiniProgram()
+                RunningMiniProgram(
+                    appId = appId,
+                    name = program.name,
+                    iconPath = program.iconPath,
+                    isForeground = visibilityTracker.isForeground(appId),
+                    lastActiveAt = lastActiveAt[appId] ?: 0L,
+                )
+            }.sortedWith(
+                compareByDescending<RunningMiniProgram> { it.isForeground }
+                    .thenByDescending { it.lastActiveAt }
+            )
+        }
+
+        /** 把已保留在后台的小程序任务切回前台；共享任务模式无法选择任务，直接拒绝。 */
+        @androidx.annotation.MainThread
+        internal fun showMiniProgramFromHost(appId: String): Boolean {
+            if (!Dimina.getInstance().isMultiTaskEnabled()) return false
+            val activity = findLiveActivity(appId) ?: return false
+            markMiniProgramActive(appId)
+            return resumeRetainedMiniProgram(activity, appId)
+        }
 
         private fun isObsoleteHostLaunch(intent: Intent): Boolean {
             // TaskInfo.baseIntent may use the boot ClassLoader. On Android 12, even a
