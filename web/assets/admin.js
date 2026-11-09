@@ -383,9 +383,9 @@
       "</div>" +
       '<div class="entry-grid">' +
       fieldHTML("名称", "name", entry.name, { placeholder: "应用显示名称" }) +
-      fieldHTML("appId", "appId", entry.appId, { placeholder: "wx..." }) +
-      fieldHTML("版本名", "versionName", entry.versionName, { placeholder: "1.0.0" }) +
-      fieldHTML("版本号", "versionCode", entry.versionCode, { type: "number", min: 1 }) +
+      fieldHTML("appId", "appId", entry.appId, { placeholder: "wx...", readonly: !!entry.file }) +
+      fieldHTML("版本名", "versionName", entry.versionName, { placeholder: "1.0.0", readonly: !!entry.file }) +
+      fieldHTML("版本号", "versionCode", entry.versionCode, { type: "number", min: 1, readonly: !!entry.file }) +
       fieldHTML("安装包路径", "zipPath", entry.zipPath, {
         full: true,
         placeholder: "packages/{appId}/{versionCode}.zip"
