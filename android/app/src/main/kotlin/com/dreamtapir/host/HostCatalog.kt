@@ -82,8 +82,14 @@ data class HostCatalogConfig(
     val debugEnabled: Boolean = false,
     /** 首页单列列表布局；默认 false 表示三列图标网格。 */
     val listLayout: Boolean = false,
+    /** 宿主外观：system（跟随系统）/ light / dark。 */
+    val themeMode: String = THEME_SYSTEM,
 ) {
     companion object {
+        const val THEME_SYSTEM = "system"
+        const val THEME_LIGHT = "light"
+        const val THEME_DARK = "dark"
+
         val Default = HostCatalogConfig()
 
         /** Preemptive HTTP Basic credential for the private site (宝塔「密码访问」). */
@@ -175,6 +181,8 @@ object HostCatalogStore {
             autoInstall = prefs.getBoolean("auto_install", false),
             debugEnabled = prefs.getBoolean("debug_enabled", false),
             listLayout = prefs.getBoolean("list_layout", false),
+            themeMode = prefs.getString("theme_mode", HostCatalogConfig.THEME_SYSTEM)
+                ?: HostCatalogConfig.THEME_SYSTEM,
         )
     }
 
@@ -190,6 +198,7 @@ object HostCatalogStore {
             .putBoolean("auto_install", config.autoInstall)
             .putBoolean("debug_enabled", config.debugEnabled)
             .putBoolean("list_layout", config.listLayout)
+            .putString("theme_mode", config.themeMode)
             .apply()
     }
 

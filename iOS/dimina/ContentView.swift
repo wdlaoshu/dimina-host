@@ -312,7 +312,7 @@ struct ContentView: View {
                         }
                     }
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(filter == item ? .white : HostTheme.muted)
+                    .foregroundColor(filter == item ? HostTheme.surface : HostTheme.muted)
                     .padding(.horizontal, 12)
                     .frame(height: 32)
                     .background(filter == item ? HostTheme.text : HostTheme.surface)
@@ -516,7 +516,7 @@ struct ContentView: View {
                 .stroke(
                     item.hasUpdate
                         ? HostTheme.primary.opacity(0.35)
-                        : Color.black.opacity(0.035),
+                        : HostTheme.line,
                     lineWidth: 1
                 )
         )
@@ -560,7 +560,7 @@ struct ContentView: View {
                 .stroke(
                     item.hasUpdate
                         ? HostTheme.primary.opacity(0.35)
-                        : Color.black.opacity(0.035),
+                        : HostTheme.line,
                     lineWidth: 1
                 )
         )
@@ -1487,6 +1487,7 @@ private struct HostSettingsSheet: View {
     @State private var authPasswordDraft = ""
     @State private var storage = HostStorageSummary()
     @State private var showDiagnostics = false
+    @AppStorage(HostThemeMode.storageKey) private var themeMode = HostThemeMode.system.rawValue
 
     var body: some View {
         ScrollView {
@@ -1549,6 +1550,8 @@ private struct HostSettingsSheet: View {
                     )
                 )
 
+                themeSection
+
                 storageSection
                 diagnosticsRow
                 networkCard
@@ -1583,6 +1586,34 @@ private struct HostSettingsSheet: View {
         }
         .sheet(isPresented: $showDiagnostics) {
             HostDiagnosticsSheet(catalog: catalog)
+        }
+    }
+
+    private var themeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("外观")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(HostTheme.text)
+            HStack(spacing: 8) {
+                ForEach(HostThemeMode.allCases, id: \.rawValue) { mode in
+                    let selected = themeMode == mode.rawValue
+                    Text(mode.title)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(selected ? HostTheme.surface : HostTheme.muted)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(selected ? HostTheme.text : HostTheme.surface)
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule().stroke(HostTheme.line, lineWidth: selected ? 0 : 1)
+                        )
+                        .onTapGesture { themeMode = mode.rawValue }
+                }
+                Spacer(minLength: 0)
+            }
+            Text("默认跟随系统深色模式切换，手动选择后立即生效")
+                .font(.system(size: 11))
+                .foregroundColor(HostTheme.muted)
         }
     }
 
@@ -1802,9 +1833,7 @@ private struct HostSettingsSheet: View {
         }
         .padding(16)
         .background(
-            network.snapshot.connected
-                ? Color(red: 0.92, green: 0.97, blue: 0.945)
-                : Color(red: 1, green: 0.94, blue: 0.94)
+            (network.snapshot.connected ? HostTheme.green : HostTheme.red).opacity(0.12)
         )
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
@@ -2004,16 +2033,52 @@ private struct HostDiagnosticsSheet: View {
 
 // MARK: - Theme
 
+/// 宿主明暗两套配色。通过动态 UIColor 桥接，跟随 traitCollection（含 overrideUserInterfaceStyle）自动切换。
 enum HostTheme {
-    static let bg = Color(red: 0.953, green: 0.961, blue: 0.984)
-    static let surface = Color.white
-    static let primary = Color(red: 0.231, green: 0.357, blue: 1)
-    static let primarySoft = Color(red: 0.914, green: 0.929, blue: 1)
-    static let text = Color(red: 0.09, green: 0.102, blue: 0.133)
-    static let muted = Color(red: 0.478, green: 0.506, blue: 0.58)
-    static let line = Color(red: 0.91, green: 0.922, blue: 0.953)
-    static let green = Color(red: 0.094, green: 0.659, blue: 0.42)
-    static let red = Color(red: 0.898, green: 0.282, blue: 0.302)
+    private static func dynamic(
+        light: (Double, Double, Double),
+        dark: (Double, Double, Double)
+    ) -> Color {
+        Color(UIColor { traits in
+            let rgb = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1)
+        })
+    }
+
+    static let bg = dynamic(light: (0.953, 0.961, 0.984), dark: (0.055, 0.067, 0.094))
+    static let surface = dynamic(light: (1, 1, 1), dark: (0.094, 0.110, 0.149))
+    static let primary = dynamic(light: (0.231, 0.357, 1), dark: (0.361, 0.455, 1))
+    static let primarySoft = dynamic(light: (0.914, 0.929, 1), dark: (0.137, 0.169, 0.290))
+    static let text = dynamic(light: (0.09, 0.102, 0.133), dark: (0.945, 0.953, 0.976))
+    static let muted = dynamic(light: (0.478, 0.506, 0.58), dark: (0.541, 0.565, 0.639))
+    static let line = dynamic(light: (0.91, 0.922, 0.953), dark: (0.149, 0.169, 0.220))
+    static let green = dynamic(light: (0.094, 0.659, 0.42), dark: (0.184, 0.741, 0.498))
+    static let red = dynamic(light: (0.898, 0.282, 0.302), dark: (1, 0.392, 0.412))
+}
+
+/// 宿主外观设置：system（跟随系统）/ light / dark，持久化在 AppStorage。
+enum HostThemeMode: String, CaseIterable {
+    case system
+    case light
+    case dark
+
+    static let storageKey = "host.theme.mode"
+
+    var title: String {
+        switch self {
+        case .system: return "跟随系统"
+        case .light: return "浅色"
+        case .dark: return "深色"
+        }
+    }
+
+    var uiStyle: UIUserInterfaceStyle {
+        switch self {
+        case .light: return .light
+        case .dark: return .dark
+        case .system: return .unspecified
+        }
+    }
 }
 
 #Preview("ContentView") {

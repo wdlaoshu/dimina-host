@@ -7,6 +7,7 @@ package com.dreamtapir.host
 
 import android.app.Activity
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.os.Handler
@@ -20,6 +21,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -78,14 +80,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -118,15 +123,63 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val HostBg = Color(0xFFF3F5FB)
-private val HostSurface = Color(0xFFFFFFFF)
-private val HostPrimary = Color(0xFF3B5BFF)
-private val HostPrimarySoft = Color(0xFFE9EDFF)
-private val HostText = Color(0xFF171A22)
-private val HostMuted = Color(0xFF7A8194)
-private val HostLine = Color(0xFFE8EBF3)
-private val HostGreen = Color(0xFF18A86B)
-private val HostRed = Color(0xFFE5484D)
+/** 宿主明暗两套调色板，经 [LocalHostPalette] 下发；下方同名只读属性保持各引用点不变。 */
+private class HostPalette(
+    val bg: Color,
+    val surface: Color,
+    val primary: Color,
+    val primarySoft: Color,
+    val text: Color,
+    val muted: Color,
+    val line: Color,
+    val green: Color,
+    val red: Color,
+)
+
+private val HostLightPalette = HostPalette(
+    bg = Color(0xFFF3F5FB),
+    surface = Color(0xFFFFFFFF),
+    primary = Color(0xFF3B5BFF),
+    primarySoft = Color(0xFFE9EDFF),
+    text = Color(0xFF171A22),
+    muted = Color(0xFF7A8194),
+    line = Color(0xFFE8EBF3),
+    green = Color(0xFF18A86B),
+    red = Color(0xFFE5484D),
+)
+
+private val HostDarkPalette = HostPalette(
+    bg = Color(0xFF0E1118),
+    surface = Color(0xFF181C26),
+    primary = Color(0xFF5C74FF),
+    primarySoft = Color(0xFF232B4A),
+    text = Color(0xFFF1F3F9),
+    muted = Color(0xFF8A90A3),
+    line = Color(0xFF262B38),
+    green = Color(0xFF2FBD7F),
+    red = Color(0xFFFF6469),
+)
+
+private val LocalHostPalette = staticCompositionLocalOf { HostLightPalette }
+
+private val HostBg: Color @Composable get() = LocalHostPalette.current.bg
+private val HostSurface: Color @Composable get() = LocalHostPalette.current.surface
+private val HostPrimary: Color @Composable get() = LocalHostPalette.current.primary
+private val HostPrimarySoft: Color @Composable get() = LocalHostPalette.current.primarySoft
+private val HostText: Color @Composable get() = LocalHostPalette.current.text
+private val HostMuted: Color @Composable get() = LocalHostPalette.current.muted
+private val HostLine: Color @Composable get() = LocalHostPalette.current.line
+private val HostGreen: Color @Composable get() = LocalHostPalette.current.green
+private val HostRed: Color @Composable get() = LocalHostPalette.current.red
+
+private fun hostDarkTheme(themeMode: String, systemDark: Boolean): Boolean = when (themeMode) {
+    HostCatalogConfig.THEME_LIGHT -> false
+    HostCatalogConfig.THEME_DARK -> true
+    else -> systemDark
+}
+
+private fun hostPaletteFor(themeMode: String, systemDark: Boolean): HostPalette =
+    if (hostDarkTheme(themeMode, systemDark)) HostDarkPalette else HostLightPalette
 
 private val IMPORT_MIME_TYPES = arrayOf("application/zip", "application/octet-stream")
 
@@ -134,22 +187,26 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val systemBarColor = HostBg.toArgb()
+        // 首帧先按持久化的主题设置着色，避免启动时闪过错误主题
+        val systemDark =
+            (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        val palette = hostPaletteFor(HostCatalogStore.loadConfig(this).themeMode, systemDark)
+        val systemBarColor = palette.bg.toArgb()
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.light(systemBarColor, systemBarColor),
-            navigationBarStyle = SystemBarStyle.light(systemBarColor, systemBarColor),
+            statusBarStyle = SystemBarStyle.auto(systemBarColor, systemBarColor),
+            navigationBarStyle = SystemBarStyle.auto(systemBarColor, systemBarColor),
         )
         @Suppress("DEPRECATION")
         window.statusBarColor = systemBarColor
+        @Suppress("DEPRECATION")
+        window.navigationBarColor = systemBarColor
         WindowInsetsControllerCompat(window, window.decorView).apply {
-            isAppearanceLightStatusBars = true
-            isAppearanceLightNavigationBars = true
+            isAppearanceLightStatusBars = !hostDarkTheme(HostCatalogStore.loadConfig(this@MainActivity).themeMode, systemDark)
+            isAppearanceLightNavigationBars = !hostDarkTheme(HostCatalogStore.loadConfig(this@MainActivity).themeMode, systemDark)
         }
 
         setContent {
-            DiminaAndroidTheme(darkTheme = false, dynamicColor = false) {
-                HostShellScreen(modifier = Modifier.fillMaxSize())
-            }
+            HostShellScreen(modifier = Modifier.fillMaxSize())
         }
     }
 }
@@ -351,6 +408,24 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
         }
     }
 
+    val darkTheme = hostDarkTheme(catalog.config.themeMode, isSystemInDarkTheme())
+    val palette = if (darkTheme) HostDarkPalette else HostLightPalette
+    // 设置里改主题时立即更新状态栏/导航栏外观
+    SideEffect {
+        activity?.window?.let { window ->
+            WindowInsetsControllerCompat(window, window.decorView).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
+            @Suppress("DEPRECATION")
+            window.statusBarColor = palette.bg.toArgb()
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = palette.bg.toArgb()
+        }
+    }
+
+    DiminaAndroidTheme(darkTheme = darkTheme, dynamicColor = false) {
+    CompositionLocalProvider(LocalHostPalette provides palette) {
     Scaffold(
         modifier = modifier,
         containerColor = HostBg,
@@ -587,6 +662,8 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
             containerColor = HostSurface,
         )
     }
+    }
+    }
 }
 
 // MARK: - Hub
@@ -767,7 +844,7 @@ private fun FilterRow(
             ) {
                 Text(
                     text = item.title,
-                    color = if (selected) Color.White else HostMuted,
+                    color = if (selected) HostSurface else HostMuted,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                 )
@@ -775,7 +852,7 @@ private fun FilterRow(
                     Spacer(Modifier.width(4.dp))
                     Text(
                         text = "$count",
-                        color = if (selected) Color.White.copy(alpha = 0.8f) else HostMuted,
+                        color = if (selected) HostSurface.copy(alpha = 0.75f) else HostMuted,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -1707,6 +1784,36 @@ private fun SettingsSheet(
         )
 
         Spacer(Modifier.height(16.dp))
+        Text("外观", color = HostText, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(
+                HostCatalogConfig.THEME_SYSTEM to "跟随系统",
+                HostCatalogConfig.THEME_LIGHT to "浅色",
+                HostCatalogConfig.THEME_DARK to "深色",
+            ).forEach { (mode, label) ->
+                val selected = catalog.config.themeMode == mode
+                Text(
+                    text = label,
+                    color = if (selected) HostSurface else HostMuted,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(if (selected) HostText else HostSurface)
+                        .clickable { catalog.updateConfig { it.copy(themeMode = mode) } }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                )
+            }
+        }
+        Text(
+            "默认跟随系统深色模式切换，手动选择后立即生效",
+            color = HostMuted,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+
+        Spacer(Modifier.height(16.dp))
         Text("存储", color = HostText, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
         Surface(color = HostBg, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
@@ -1888,7 +1995,7 @@ private fun NetworkCard(network: NetworkSnapshot, onRefresh: () -> Unit) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(
-                if (network.connected) Color(0xFFEBF7F0) else Color(0xFFFFF0F0)
+                (if (network.connected) HostGreen else HostRed).copy(alpha = 0.12f)
             )
             .combinedClickable(onClick = onRefresh, onLongClick = onRefresh)
             .padding(16.dp),
