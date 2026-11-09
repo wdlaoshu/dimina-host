@@ -133,6 +133,11 @@ async function main() {
 		// Write updated config
 		fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
 
+		// Copy config.json into the app directory so the ZIP root contains it
+		// (the publishing console requires config.json with appId at the ZIP root)
+		const configInApp = path.join(appPublicPath, 'config.json')
+		fs.copyFileSync(configPath, configInApp)
+
 		// Create zip file from the app directory
 		try {
 			const zipPath = path.join(appSharedPath, `${appId}.zip`)
@@ -141,6 +146,10 @@ async function main() {
 		catch (error) {
 			console.error(`Error creating zip for ${appId}:`, error)
 			failedAppIds.push(appId)
+		}
+		finally {
+			// Clean up the copied config so it doesn't pollute the compiler output dir
+			fs.rmSync(configInApp, { force: true })
 		}
 	}
 
