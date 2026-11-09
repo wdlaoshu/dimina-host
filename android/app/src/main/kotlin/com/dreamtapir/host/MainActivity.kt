@@ -875,6 +875,8 @@ private fun LayoutToggle(listLayout: Boolean, onToggle: () -> Unit) {
             .clickable(onClick = onToggle),
         contentAlignment = Alignment.Center,
     ) {
+        // DrawScope 不是 Composable 上下文，颜色先取出再画
+        val iconColor = HostText
         Canvas(Modifier.size(14.dp)) {
             if (listLayout) {
                 // 当前单列，目标图标是网格。
@@ -882,7 +884,7 @@ private fun LayoutToggle(listLayout: Boolean, onToggle: () -> Unit) {
                 val far = size.width - cell
                 listOf(0f to 0f, far to 0f, 0f to far, far to far).forEach { (x, y) ->
                     drawRoundRect(
-                        color = HostText,
+                        color = iconColor,
                         topLeft = Offset(x, y),
                         size = Size(cell, cell),
                         cornerRadius = CornerRadius(cell * 0.25f),
@@ -893,7 +895,7 @@ private fun LayoutToggle(listLayout: Boolean, onToggle: () -> Unit) {
                 val thickness = size.height / 7f
                 listOf(0f, (size.height - thickness) / 2f, size.height - thickness).forEach { y ->
                     drawRoundRect(
-                        color = HostText,
+                        color = iconColor,
                         topLeft = Offset(0f, y),
                         size = Size(size.width, thickness),
                         cornerRadius = CornerRadius(thickness / 2f),
