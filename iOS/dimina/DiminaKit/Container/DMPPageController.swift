@@ -169,7 +169,7 @@ public class DMPPageController: UIViewController {
         super.viewDidAppear(animated)
         // 上一个页面的胶囊菜单遮罩可能还留在共享的导航容器上，新页面出现时兜底清掉，
         // 否则整页会被一层灰盖住、连图片选择器也点不动。
-        let presentationView = navigationController?.view ?? parent?.view ?? view
+        let presentationView: UIView = navigationController?.view ?? parent?.view ?? view
         presentationView.subviews
             .filter { $0.tag == DMPPageController.miniProgramMenuTag && $0 !== miniProgramMenuContainerView }
             .forEach { $0.removeFromSuperview() }
@@ -586,7 +586,7 @@ public class DMPPageController: UIViewController {
         // 遮罩挂在共享的 navigationController.view 上，页面切换/销毁时不会自动跟着走。
         // 这里先清掉别的页面遗留的同名遮罩，避免旧遮罩一直盖住整个小程序
         // （表现为选图片时被一层灰挡住、点哪里都没反应）。
-        let presentationView = navigationController?.view ?? parent?.view ?? view
+        let presentationView: UIView = navigationController?.view ?? parent?.view ?? view
         presentationView.subviews
             .filter { $0.tag == DMPPageController.miniProgramMenuTag }
             .forEach { $0.removeFromSuperview() }
