@@ -39,7 +39,9 @@ data class TabBarConfig(
     val selectedColor: String = "#1890ff",
     val borderStyle: String = "black",
     val backgroundColor: String = "#FFFFFF",
-    val list: List<TabBarItem> = emptyList()
+    val list: List<TabBarItem> = emptyList(),
+    /** 微信自定义 tabBar：为 true 时由小程序 custom-tab-bar 组件渲染底部栏，原生栏需要隐藏。 */
+    val custom: Boolean = false
 )
 
 @Serializable

@@ -992,7 +992,15 @@ class Runtime {
 						? function (...args) {
 							const pageVNode = pageRender.apply(this, args)
 							const CustomTabBar = resolveComponent(`dd-${customTabBarComponentName}`)
-							return h(Fragment, null, [pageVNode, h(CustomTabBar)])
+							// 对齐微信：custom-tab-bar 由框架固定在屏幕底部，组件自身只需
+							// 决定高度与内容，无需在 CSS 里写 position: fixed。
+							return h(Fragment, null, [
+								pageVNode,
+								h('div', {
+									class: 'dimina-custom-tabbar',
+									style: 'position:fixed;left:0;right:0;bottom:0;z-index:999;',
+								}, [h(CustomTabBar)]),
+							])
 						}
 						: pageRender,
 					},

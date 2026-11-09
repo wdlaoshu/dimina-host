@@ -156,6 +156,9 @@ struct DMPTabBarConfig {
     var borderStyle: String
     var backgroundColor: String
     var list: [DMPTabBarItem]
+    /// 微信自定义 tabBar：为 true 时由小程序自己的 custom-tab-bar 组件渲染底部栏，
+    /// 原生 tabBar 需要隐藏，否则会出现双 tabBar。
+    var custom: Bool = false
 
     static func from(_ data: [String: Any]?) -> DMPTabBarConfig? {
         guard let data = data else { return nil }
@@ -171,7 +174,8 @@ struct DMPTabBarConfig {
             selectedColor: data["selectedColor"] as? String ?? "#1890ff",
             borderStyle: data["borderStyle"] as? String ?? "black",
             backgroundColor: data["backgroundColor"] as? String ?? "#FFFFFF",
-            list: items
+            list: items,
+            custom: (data["custom"] as? Bool) ?? false
         )
     }
 }

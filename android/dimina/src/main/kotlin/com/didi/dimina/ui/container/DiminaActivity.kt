@@ -1082,7 +1082,8 @@ class DiminaActivity : ComponentActivity() {
 
     private fun resetTabBarDynamicState(config: TabBarConfig?) {
         val listLength = config?.list?.size ?: 0
-        tabBarVisible.value = true
+        // 自定义 tabBar 时原生栏默认隐藏，由小程序 custom-tab-bar 组件自行渲染。
+        tabBarVisible.value = config?.custom != true
         tabBarBadges.value = List(listLength) { "" }
         tabBarRedDots.value = List(listLength) { false }
     }
@@ -1142,7 +1143,10 @@ class DiminaActivity : ComponentActivity() {
 
     fun showTabBar() {
         runOnUiThread {
-            tabBarVisible.value = true
+            // 自定义 tabBar 应用始终隐藏原生栏，避免 wx.showTabBar 把原生栏再叫出来。
+            if (tabBarConfigState.value?.custom != true) {
+                tabBarVisible.value = true
+            }
         }
     }
 

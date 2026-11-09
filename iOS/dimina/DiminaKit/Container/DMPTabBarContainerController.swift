@@ -78,6 +78,10 @@ final class DMPTabBarContainerController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = DMPUtil.colorFromHexString(tabBarConfig.backgroundColor) ?? .white
         setupViews()
+        // 自定义 tabBar 时原生栏隐藏，由小程序 custom-tab-bar 组件自行渲染。
+        if tabBarConfig.custom {
+            setTabBarVisible(false)
+        }
         attachLoadedTabIfNeeded(selectedIndex)
         updateVisibleTab()
     }
@@ -181,7 +185,9 @@ final class DMPTabBarContainerController: UIViewController {
     }
 
     func setTabBarVisible(_ visible: Bool) {
-        tabBarView.isHidden = !visible
+        // 自定义 tabBar 应用始终隐藏原生栏，避免 wx.showTabBar 把原生栏再叫出来。
+        let effectiveVisible = tabBarConfig.custom ? false : visible
+        tabBarView.isHidden = !effectiveVisible
         updateTabBarHeight()
         view.layoutIfNeeded()
     }
