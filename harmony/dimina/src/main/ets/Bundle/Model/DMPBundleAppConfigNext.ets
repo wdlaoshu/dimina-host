@@ -15,6 +15,7 @@ export interface DMPTabBarConfig {
   backgroundColor: string;
   borderStyle: string;  // "black" or "white"
   list: DMPTabBarItem[];
+  custom?: boolean;  // custom tabBar 由小程序 custom-tab-bar 组件渲染
 }
 
 //app-config.json

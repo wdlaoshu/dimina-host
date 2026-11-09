@@ -444,7 +444,8 @@ export struct DMPTabBarContainerView {
       .width('100%')
 
       // TabBar at container level
-      if (this.tabBarConfig && this.tabBarVisible) {
+      // custom tabBar 由小程序的 custom-tab-bar 组件渲染，原生 tabBar 不参与显示
+      if (this.tabBarConfig && this.tabBarVisible && !this.tabBarConfig.custom) {
         DMPTabBar({
           selectedIndex: this.selectedIndex,
           tabBarConfig: this.tabBarConfig,

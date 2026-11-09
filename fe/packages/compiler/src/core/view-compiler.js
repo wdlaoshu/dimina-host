@@ -1256,6 +1256,7 @@ function toCompileTemplate(isComponent, path, components, componentPlaceholder, 
 	importNodes.remove()
 
 	transAsses($, $('image'), sourcePath, path)
+	transAssetAttributes($, $('*'), sourcePath, path)
 
 	const res = []
 
@@ -1288,6 +1289,7 @@ function transTagTemplate($, templateModule, path, components, componentPlacehol
 		templateContent.find('include').remove()
 		templateContent.find(getViewScriptTags().join(',')).remove()
 		transAsses($, templateContent.find('image'), path, graphOwnerPath)
+		transAssetAttributes($, templateContent.find('*'), path, graphOwnerPath)
 		const res = []
 		normalizeTemplateDom($, templateContent, components)
 		transHtmlTag(templateContent.html(), res, components, componentPlaceholder, `${path}#${name}`)
@@ -1335,21 +1337,77 @@ function getSourceLine(newlineOffsets, index = 0) {
 	return lo + 1
 }
 
+const DYNAMIC_ASSET_LITERAL_PATTERN = /(['"])([^'"]*)\1/g
+
+function transDynamicAssetLiterals(rawSrc, path, graphOwnerPath) {
+	return rawSrc.replace(DYNAMIC_ASSET_LITERAL_PATTERN, (literal, _quote, value) => {
+		const src = value.trim()
+		// 只处理表达式里的本地图片字面量，网络地址、已是产物路径的字符串和普通字符串都保持原样
+		if (src.startsWith('http')
+			|| src.startsWith('//')
+			|| src.includes('/main/static/')
+			|| !isCollectableImageAsset(src)) {
+			return literal
+		}
+
+		getDependencyGraph().addFile(
+			graphOwnerPath,
+			resolveAssetSourcePath(getWorkPath(), path, src),
+			'view',
+		)
+		return `${literal[0]}${collectAssets(getWorkPath(), path, src, getTargetPath(), getAppId())}${literal[0]}`
+	})
+}
+
 function transAsses($, imageNodes, path, graphOwnerPath = path) {
 	imageNodes.each((_, elem) => {
-		// 获取所有的图片，不支持动态引用本地资源
-		const imgSrc = $(elem).attr('src').trim()
-		if (!imgSrc.startsWith('{{')) {
-			if (!imgSrc.startsWith('http')
-				&& !imgSrc.startsWith('//')
-				&& isCollectableImageAsset(imgSrc)) {
-				getDependencyGraph().addFile(
-					graphOwnerPath,
-					resolveAssetSourcePath(getWorkPath(), path, imgSrc),
-					'view',
-				)
+		// 获取所有的图片
+		const imgSrc = ($(elem).attr('src') || '').trim()
+		if (!imgSrc) {
+			return
+		}
+
+		// 动态表达式里的本地资源同样要发布到 static 目录，否则运行时按原路径请求会 404
+		if (imgSrc.startsWith('{{')) {
+			$(elem).attr('src', transDynamicAssetLiterals(imgSrc, path, graphOwnerPath))
+			return
+		}
+
+		if (!imgSrc.startsWith('http')
+			&& !imgSrc.startsWith('//')
+			&& isCollectableImageAsset(imgSrc)) {
+			getDependencyGraph().addFile(
+				graphOwnerPath,
+				resolveAssetSourcePath(getWorkPath(), path, imgSrc),
+				'view',
+			)
+		}
+		$(elem).attr('src', collectAssets(getWorkPath(), path, imgSrc, getTargetPath(), getAppId()))
+	})
+}
+
+// 自定义组件的 icon-path 等属性也可能指向本地图片，编译期按文件是否存在判断并改写为产物路径
+function transAssetAttributes($, elements, path, graphOwnerPath = path) {
+	elements.each((_, elem) => {
+		for (const name of Object.keys(elem.attribs || {})) {
+			const value = ($(elem).attr(name) || '').trim()
+			if (!value
+				|| value.startsWith('{{')
+				|| value.startsWith('http')
+				|| value.startsWith('//')
+				|| value.includes('/main/static/')
+				|| !/^[./]/.test(value)
+				|| !isCollectableImageAsset(value)) {
+				continue
 			}
-			$(elem).attr('src', collectAssets(getWorkPath(), path, imgSrc, getTargetPath(), getAppId()))
+
+			const absolutePath = resolveAssetSourcePath(getWorkPath(), path, value)
+			if (!fs.existsSync(absolutePath)) {
+				continue
+			}
+
+			getDependencyGraph().addFile(graphOwnerPath, absolutePath, 'view')
+			$(elem).attr(name, collectAssets(getWorkPath(), path, value, getTargetPath(), getAppId()))
 		}
 	})
 }
