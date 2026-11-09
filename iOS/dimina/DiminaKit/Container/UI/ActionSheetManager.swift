@@ -29,11 +29,13 @@ public class ActionSheetManager {
     /// Background view for dimming
     private var backgroundView: UIView?
     
-    /// Completion handler for the currently visible action sheet.
-    /// Stored separately from the item buttons so a background-tap cancel
-    /// can also deliver the result instead of dropping the callback
-    /// (which would leave the JS promise pending forever).
+    /// 当前 action sheet 的回调。由 manager 自己持有，而不是塞进按钮的 layer 里再取回，
+    /// 这样背景点击、"取消"、item 点击三条路径都能拿到同一个回调，
+    /// 不会因为某条路径拿不到回调而让 JS promise 永久 pending。
     private var currentCompletion: ActionSheetCompletionHandler?
+
+    /// 正在执行退场动画，防止按钮/遮罩在动画期间重复触发导致回调执行两次
+    private var isDismissing = false
     
     /// Private initializer to enforce singleton pattern
     private init() {}
@@ -53,8 +55,18 @@ public class ActionSheetManager {
         // Ensure UI updates happen on the main thread
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            
+
+            // 上一个 sheet 还没结算（例如退场动画被打断）：先按"取消"交付回调，
+            // 否则它的 JS promise 会永久 pending，页面一直停在 loading。
+            if let pending = self.currentCompletion {
+                self.currentCompletion = nil
+                pending(-1)
+            }
+            // 清掉可能残留的窗口，避免旧遮罩叠在新 picker / 新页面之上
+            self.destroyActionSheetWindow()
+
             self.currentCompletion = completion
+            self.isDismissing = false
             
             // Create a dedicated window for the action sheet
             self.createActionSheetWindow()
@@ -62,8 +74,7 @@ public class ActionSheetManager {
             // Create action sheet content
             self.createActionSheetContent(
                 itemList: itemList,
-                itemColor: itemColor,
-                completion: completion
+                itemColor: itemColor
             )
             
             // Make the window visible
@@ -80,25 +91,48 @@ public class ActionSheetManager {
     /// Hide the currently displayed action sheet
     private func hideActionSheet(selectedIndex: Int, completion: ActionSheetCompletionHandler?) {
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            
+            guard let self = self, !self.isDismissing else { return }
+            self.isDismissing = true
+
+            let window = self.actionSheetWindow
+            let background = self.backgroundView
+            let container = self.containerView
+            self.currentCompletion = nil
+
             // Animate out and remove action sheet window
             UIView.animate(withDuration: 0.2, animations: {
-                self.backgroundView?.alpha = 0
-                if let containerView = self.containerView {
-                    containerView.transform = CGAffineTransform(translationX: 0, y: containerView.frame.height)
+                background?.alpha = 0
+                if let container = container {
+                    container.transform = CGAffineTransform(translationX: 0, y: container.frame.height)
                 }
             }) { _ in
-                self.actionSheetWindow?.isHidden = true
-                self.actionSheetWindow = nil
-                self.containerView = nil
-                self.backgroundView = nil
-                self.currentCompletion = nil
-                
+                // 动画期间可能已经弹出了新的 sheet。只销毁自己那个窗口，
+                // 否则会把新窗口一起干掉，遮罩反而消失不掉。
+                if self.actionSheetWindow === window {
+                    self.destroyActionSheetWindow()
+                    self.isDismissing = false
+                } else {
+                    background?.removeFromSuperview()
+                    container?.removeFromSuperview()
+                    window?.isHidden = true
+                }
+
                 // Call completion handler
                 completion?(selectedIndex)
             }
         }
+    }
+
+    /// 销毁 action sheet 窗口。幂等，可在任意时机调用。
+    private func destroyActionSheetWindow() {
+        backgroundView?.layer.removeAllAnimations()
+        backgroundView?.removeFromSuperview()
+        containerView?.layer.removeAllAnimations()
+        containerView?.removeFromSuperview()
+        backgroundView = nil
+        containerView = nil
+        actionSheetWindow?.isHidden = true
+        actionSheetWindow = nil
     }
     
     // MARK: - Private Methods
@@ -129,8 +163,7 @@ public class ActionSheetManager {
     /// Create the action sheet content
     private func createActionSheetContent(
         itemList: [String],
-        itemColor: String,
-        completion: @escaping ActionSheetCompletionHandler
+        itemColor: String
     ) {
         guard let window = self.actionSheetWindow, let rootView = window.rootViewController?.view else { return }
         
@@ -190,9 +223,6 @@ public class ActionSheetManager {
             button.addTarget(self, action: #selector(itemButtonTapped(_:)), for: .touchUpInside)
             button.heightAnchor.constraint(equalToConstant: 50).isActive = true
             
-            // Store completion handler in button for later use
-            button.layer.setValue(completion, forKey: "completionHandler")
-            
             optionsStackView.addArrangedSubview(button)
         }
         
@@ -208,9 +238,6 @@ public class ActionSheetManager {
         cancelButton.addTarget(self, action: #selector(cancelButtonTapped(_:)), for: .touchUpInside)
         cancelButton.heightAnchor.constraint(equalToConstant: 55).isActive = true
         
-        // Store completion handler in button for later use
-        cancelButton.layer.setValue(completion, forKey: "completionHandler")
-        
         mainStackView.addArrangedSubview(cancelButton)
         
         // Set up constraints
@@ -219,7 +246,7 @@ public class ActionSheetManager {
             mainStackView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 8),
             mainStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 8),
             mainStackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -8),
-            mainStackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -8),
+            mainStackView.bottomAnchor.constraint(equalTo: rootView.safeAreaLayoutGuide.bottomAnchor, constant: -8),
             
             // Container view constraints (at the bottom of the screen)
             containerView.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
@@ -236,15 +263,11 @@ public class ActionSheetManager {
     // MARK: - Button Actions
     
     @objc private func itemButtonTapped(_ sender: UIButton) {
-        if let completion = sender.layer.value(forKey: "completionHandler") as? ActionSheetCompletionHandler {
-            hideActionSheet(selectedIndex: sender.tag, completion: completion)
-        }
+        hideActionSheet(selectedIndex: sender.tag, completion: currentCompletion)
     }
     
     @objc private func cancelButtonTapped(_ sender: UIButton) {
-        if let completion = sender.layer.value(forKey: "completionHandler") as? ActionSheetCompletionHandler {
-            hideActionSheet(selectedIndex: -1, completion: completion) // -1 indicates cancel
-        }
+        hideActionSheet(selectedIndex: -1, completion: currentCompletion) // -1 indicates cancel
     }
     
     @objc private func backgroundTapped() {

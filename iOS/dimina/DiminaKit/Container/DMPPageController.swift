@@ -45,6 +45,8 @@ public class DMPPageController: UIViewController {
     private var homeButtonLeadingToEdge: NSLayoutConstraint?
     private var homeButtonLeadingAfterBack: NSLayoutConstraint?
     private var miniProgramMenuContainerView: UIView?
+    // 菜单遮罩挂在共享的 navigationController.view 上，需要 tag 才能跨页面找回并清理
+    private static let miniProgramMenuTag = 0x4D50_0001
     private var isClosingMiniProgram = false
     private var webViewTopToNavigationConstraint: NSLayoutConstraint?
     private var webViewTopToViewConstraint: NSLayoutConstraint?
@@ -165,6 +167,13 @@ public class DMPPageController: UIViewController {
     // View did appear
     public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // 上一个页面的胶囊菜单遮罩可能还留在共享的导航容器上，新页面出现时兜底清掉，
+        // 否则整页会被一层灰盖住、连图片选择器也点不动。
+        let presentationView = navigationController?.view ?? parent?.view ?? view
+        presentationView.subviews
+            .filter { $0.tag == DMPPageController.miniProgramMenuTag && $0 !== miniProgramMenuContainerView }
+            .forEach { $0.removeFromSuperview() }
+
         startLoadingIfNeeded()
     }
 
@@ -549,7 +558,7 @@ public class DMPPageController: UIViewController {
         }
         isClosingMiniProgram = true
 
-        dismissMiniProgramMenu()
+        dismissMiniProgramMenu(animated: true)
         navigator?.setCapsuleEnabled(false)
 
         guard let app else {
@@ -574,45 +583,56 @@ public class DMPPageController: UIViewController {
             return
         }
 
+        // 遮罩挂在共享的 navigationController.view 上，页面切换/销毁时不会自动跟着走。
+        // 这里先清掉别的页面遗留的同名遮罩，避免旧遮罩一直盖住整个小程序
+        // （表现为选图片时被一层灰挡住、点哪里都没反应）。
+        let presentationView = navigationController?.view ?? parent?.view ?? view
+        presentationView.subviews
+            .filter { $0.tag == DMPPageController.miniProgramMenuTag }
+            .forEach { $0.removeFromSuperview() }
+
         let overlay = UIControl()
+        overlay.tag = DMPPageController.miniProgramMenuTag
         overlay.translatesAutoresizingMaskIntoConstraints = false
-        overlay.backgroundColor = UIColor.black.withAlphaComponent(0.55)
-        overlay.addTarget(self, action: #selector(dismissMiniProgramMenu), for: .touchUpInside)
+        overlay.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+        overlay.alpha = 0
+        overlay.addTarget(self, action: #selector(dismissMiniProgramMenuFromOverlay), for: .touchUpInside)
 
         let sheetView = UIView()
         sheetView.translatesAutoresizingMaskIntoConstraints = false
-        sheetView.backgroundColor = .white
-        sheetView.layer.cornerRadius = 18
+        sheetView.backgroundColor = .systemBackground
+        sheetView.layer.cornerRadius = 20
         if #available(iOS 11.0, *) {
             sheetView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
         }
+        sheetView.layer.masksToBounds = true
 
         let iconLabel = UILabel()
         iconLabel.translatesAutoresizingMaskIntoConstraints = false
         iconLabel.text = String(appConfig.appName.prefix(1)).isEmpty ? "小" : String(appConfig.appName.prefix(1))
         iconLabel.textAlignment = .center
         iconLabel.font = .systemFont(ofSize: 18, weight: .medium)
-        iconLabel.textColor = UIColor(red: 138 / 255, green: 138 / 255, blue: 138 / 255, alpha: 1)
-        iconLabel.backgroundColor = UIColor(red: 244 / 255, green: 244 / 255, blue: 244 / 255, alpha: 1)
-        iconLabel.layer.cornerRadius = 22
+        iconLabel.textColor = .secondaryLabel
+        iconLabel.backgroundColor = .secondarySystemBackground
+        iconLabel.layer.cornerRadius = 11
         iconLabel.clipsToBounds = true
 
         let titleLabel = UILabel()
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.text = appConfig.appName
-        titleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
-        titleLabel.textColor = UIColor(red: 32 / 255, green: 32 / 255, blue: 32 / 255, alpha: 1)
+        titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+        titleLabel.textColor = .label
 
         let subtitleLabel = UILabel()
         subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
         subtitleLabel.text = "小程序"
-        subtitleLabel.font = .systemFont(ofSize: 14)
-        subtitleLabel.textColor = UIColor(red: 154 / 255, green: 154 / 255, blue: 154 / 255, alpha: 1)
+        subtitleLabel.font = .systemFont(ofSize: 13)
+        subtitleLabel.textColor = .secondaryLabel
 
         let titleStack = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel])
         titleStack.translatesAutoresizingMaskIntoConstraints = false
         titleStack.axis = .vertical
-        titleStack.spacing = 3
+        titleStack.spacing = 2
 
         let headerView = UIView()
         headerView.translatesAutoresizingMaskIntoConstraints = false
@@ -621,44 +641,38 @@ public class DMPPageController: UIViewController {
 
         let topDivider = UIView()
         topDivider.translatesAutoresizingMaskIntoConstraints = false
-        topDivider.backgroundColor = UIColor(red: 242 / 255, green: 242 / 255, blue: 242 / 255, alpha: 1)
+        topDivider.backgroundColor = .separator
 
-        let iconColor = UIColor(red: 51 / 255, green: 51 / 255, blue: 51 / 255, alpha: 1)
-        let symbolConfiguration = UIImage.SymbolConfiguration(pointSize: 24, weight: .medium)
+        let symbolConfiguration = UIImage.SymbolConfiguration(pointSize: 22, weight: .medium)
 
         let reenterItem = makeMiniProgramMenuItem(
             title: "重新进入\n小程序",
-            image: UIImage(systemName: "arrow.clockwise", withConfiguration: symbolConfiguration)?
-                .withTintColor(iconColor, renderingMode: .alwaysOriginal) ?? UIImage(),
+            image: UIImage(systemName: "arrow.clockwise", withConfiguration: symbolConfiguration),
             action: #selector(miniProgramMenuReenterTapped)
         )
         let closeItem = makeMiniProgramMenuItem(
             title: "关闭小程序",
-            image: UIImage(systemName: "xmark", withConfiguration: symbolConfiguration)?
-                .withTintColor(iconColor, renderingMode: .alwaysOriginal) ?? UIImage(),
+            image: UIImage(systemName: "xmark", withConfiguration: symbolConfiguration),
             action: #selector(miniProgramMenuCloseTapped)
         )
 
         let actionStack = UIStackView(arrangedSubviews: [reenterItem, closeItem])
         actionStack.translatesAutoresizingMaskIntoConstraints = false
         actionStack.axis = .horizontal
-        actionStack.distribution = .fill
-        actionStack.spacing = 16
+        actionStack.alignment = .top
+        actionStack.spacing = 8
 
         let bottomDivider = UIView()
         bottomDivider.translatesAutoresizingMaskIntoConstraints = false
-        bottomDivider.backgroundColor = UIColor(red: 237 / 255, green: 237 / 255, blue: 237 / 255, alpha: 1)
+        bottomDivider.backgroundColor = .separator
 
-        let cancelButton = UIButton(type: .custom)
+        let cancelButton = UIButton(type: .system)
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
         cancelButton.setTitle("取消", for: .normal)
-        cancelButton.setTitleColor(UIColor(red: 87 / 255, green: 107 / 255, blue: 149 / 255, alpha: 1), for: .normal)
-        cancelButton.titleLabel?.font = .systemFont(ofSize: 18)
-        cancelButton.addTarget(self, action: #selector(dismissMiniProgramMenu), for: .touchUpInside)
+        cancelButton.setTitleColor(.systemBlue, for: .normal)
+        cancelButton.titleLabel?.font = .systemFont(ofSize: 17)
+        cancelButton.addTarget(self, action: #selector(dismissMiniProgramMenuFromOverlay), for: .touchUpInside)
 
-        guard let presentationView = navigationController?.view ?? parent?.view ?? view else {
-            return
-        }
         presentationView.addSubview(overlay)
         overlay.addSubview(sheetView)
         sheetView.addSubview(headerView)
@@ -681,7 +695,7 @@ public class DMPPageController: UIViewController {
             headerView.topAnchor.constraint(equalTo: sheetView.topAnchor),
             headerView.leadingAnchor.constraint(equalTo: sheetView.leadingAnchor),
             headerView.trailingAnchor.constraint(equalTo: sheetView.trailingAnchor),
-            headerView.heightAnchor.constraint(equalToConstant: 84),
+            headerView.heightAnchor.constraint(equalToConstant: 88),
 
             iconLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 24),
             iconLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
@@ -697,10 +711,9 @@ public class DMPPageController: UIViewController {
             topDivider.trailingAnchor.constraint(equalTo: sheetView.trailingAnchor),
             topDivider.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale),
 
-            actionStack.topAnchor.constraint(equalTo: topDivider.bottomAnchor, constant: 20),
-            actionStack.leadingAnchor.constraint(equalTo: sheetView.leadingAnchor, constant: 24),
-            actionStack.widthAnchor.constraint(equalToConstant: 172),
-            actionStack.heightAnchor.constraint(equalToConstant: 94),
+            actionStack.topAnchor.constraint(equalTo: topDivider.bottomAnchor, constant: 22),
+            actionStack.leadingAnchor.constraint(equalTo: sheetView.leadingAnchor, constant: 20),
+            actionStack.heightAnchor.constraint(equalToConstant: 96),
 
             bottomDivider.topAnchor.constraint(equalTo: actionStack.bottomAnchor, constant: 20),
             bottomDivider.leadingAnchor.constraint(equalTo: sheetView.leadingAnchor),
@@ -710,34 +723,43 @@ public class DMPPageController: UIViewController {
             cancelButton.topAnchor.constraint(equalTo: bottomDivider.bottomAnchor),
             cancelButton.leadingAnchor.constraint(equalTo: sheetView.leadingAnchor),
             cancelButton.trailingAnchor.constraint(equalTo: sheetView.trailingAnchor),
-            cancelButton.heightAnchor.constraint(equalToConstant: 58),
+            cancelButton.heightAnchor.constraint(equalToConstant: 56),
             cancelButton.bottomAnchor.constraint(equalTo: sheetView.bottomAnchor, constant: -bottomInset),
         ])
 
         miniProgramMenuContainerView = overlay
         presentationView.bringSubviewToFront(overlay)
+
+        // 入场：遮罩淡入 + 卡片从底部滑入
+        sheetView.transform = CGAffineTransform(translationX: 0, y: 320)
+        presentationView.layoutIfNeeded()
+        UIView.animate(withDuration: 0.26, delay: 0, options: .curveEaseOut) {
+            overlay.alpha = 1
+            sheetView.transform = .identity
+        }
     }
 
-    private func makeMiniProgramMenuItem(title: String, image: UIImage, action: Selector) -> UIControl {
+    private func makeMiniProgramMenuItem(title: String, image: UIImage?, action: Selector) -> UIControl {
         let control = UIControl()
         control.translatesAutoresizingMaskIntoConstraints = false
         control.addTarget(self, action: action, for: .touchUpInside)
 
         let iconContainer = UIView()
         iconContainer.translatesAutoresizingMaskIntoConstraints = false
-        iconContainer.backgroundColor = UIColor(red: 248 / 255, green: 248 / 255, blue: 248 / 255, alpha: 1)
-        iconContainer.layer.cornerRadius = 10
+        iconContainer.backgroundColor = .secondarySystemBackground
+        iconContainer.layer.cornerRadius = 14
         iconContainer.isUserInteractionEnabled = false
 
         let imageView = UIImageView(image: image)
         imageView.translatesAutoresizingMaskIntoConstraints = false
         imageView.contentMode = .center
+        imageView.tintColor = .label
 
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
         label.text = title
-        label.font = .systemFont(ofSize: 13)
-        label.textColor = UIColor(red: 104 / 255, green: 104 / 255, blue: 104 / 255, alpha: 1)
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 2
 
@@ -746,12 +768,12 @@ public class DMPPageController: UIViewController {
         control.addSubview(label)
 
         NSLayoutConstraint.activate([
-            control.widthAnchor.constraint(equalToConstant: 78),
+            control.widthAnchor.constraint(equalToConstant: 88),
 
             iconContainer.topAnchor.constraint(equalTo: control.topAnchor),
             iconContainer.centerXAnchor.constraint(equalTo: control.centerXAnchor),
-            iconContainer.widthAnchor.constraint(equalToConstant: 52),
-            iconContainer.heightAnchor.constraint(equalToConstant: 52),
+            iconContainer.widthAnchor.constraint(equalToConstant: 56),
+            iconContainer.heightAnchor.constraint(equalToConstant: 56),
 
             imageView.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
             imageView.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
@@ -767,20 +789,38 @@ public class DMPPageController: UIViewController {
         return control
     }
 
-    @objc private func dismissMiniProgramMenu() {
-        miniProgramMenuContainerView?.removeFromSuperview()
+    @objc private func dismissMiniProgramMenuFromOverlay() {
+        dismissMiniProgramMenu(animated: true)
+    }
+
+    private func dismissMiniProgramMenu(animated: Bool) {
+        guard let overlay = miniProgramMenuContainerView else {
+            return
+        }
         miniProgramMenuContainerView = nil
+
+        guard animated, let sheetView = overlay.subviews.first else {
+            overlay.removeFromSuperview()
+            return
+        }
+
+        UIView.animate(withDuration: 0.2, animations: {
+            overlay.alpha = 0
+            sheetView.transform = CGAffineTransform(translationX: 0, y: sheetView.bounds.height)
+        }) { _ in
+            overlay.removeFromSuperview()
+        }
     }
 
     @objc private func miniProgramMenuReenterTapped() {
-        dismissMiniProgramMenu()
+        dismissMiniProgramMenu(animated: true)
         Task { @MainActor in
             await app?.reEnter()
         }
     }
 
     @objc private func miniProgramMenuCloseTapped() {
-        dismissMiniProgramMenu()
+        dismissMiniProgramMenu(animated: true)
         closeMiniProgramFromCapsule()
     }
 
@@ -956,6 +996,9 @@ public class DMPPageController: UIViewController {
     public override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         hidePageLoading()
+
+        // 页面离开时必须收掉胶囊菜单，否则遮罩留在共享的导航容器上会一直盖住后续页面
+        dismissMiniProgramMenu(animated: false)
         
         // Notify lifecycle management when page completely disappears
         if isMovingFromParent && navigator?.isRetainedInBackground != true {
@@ -1008,6 +1051,9 @@ public class DMPPageController: UIViewController {
     
     deinit {
         DMPLogger.debug("🗑️ DMPPageController: deinit (WebView ID: \(webview.getWebViewId()))")
+        // deinit 不会再走 viewDidDisappear，这里兜底清理挂在共享容器上的菜单遮罩
+        miniProgramMenuContainerView?.removeFromSuperview()
+        miniProgramMenuContainerView = nil
         webview.clearLoadingStateObserver(ownerToken: loadingStateObserverToken)
         // Ensure WebView is correctly released
         destroyWebView()
