@@ -1751,7 +1751,7 @@ class DiminaActivity : ComponentActivity() {
                         Dimina.getInstance().showMiniProgram(appId)
                     },
                     onCloseApp = { appId ->
-                        Dimina.getInstance().closeMiniProgram(appId)
+                        closeBackgroundMiniProgram(appId)
                         switcherRevision.intValue++
                     },
                     onDismiss = {
@@ -1994,6 +1994,14 @@ class DiminaActivity : ComponentActivity() {
         val returnTask = returnTasks[miniProgram.appId]
         getSystemService(ActivityManager::class.java).appTasks
             .firstOrNull { it.taskInfo.taskId == returnTask }?.moveToFront()
+    }
+
+    /**
+     * 切换器里关闭后台实例：必须走宿主的 exit 链路，让 opener 的返回参数与所属 task 正常收尾。
+     * 当前实例不提供关闭入口，所以这里只会命中后台实例。
+     */
+    private fun closeBackgroundMiniProgram(appId: String) {
+        Dimina.getInstance().closeMiniProgram(appId)
     }
 
     private fun closeMiniProgram() {
