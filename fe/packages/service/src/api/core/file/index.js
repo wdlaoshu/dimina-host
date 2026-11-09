@@ -14,6 +14,17 @@ export function openDocument(opts) {
 	return invokeAPI('openDocument', opts)
 }
 
+/**
+ * 获取本地临时文件或本地缓存文件信息。
+ * 微信已把它收敛到 FileSystemManager，但顶层 wx.getFileInfo 仍然保留，
+ * 小程序里普遍这么用。这里缺了它的话 wx.getFileInfo 是 undefined，
+ * 在 success 回调里调用会抛 TypeError，把调用方的 promise 永久挂住。
+ * https://developers.weixin.qq.com/miniprogram/dev/api/file/wx.getFileInfo.html
+ */
+export function getFileInfo(opts) {
+	return invokeFileAPI('FileSystemManager.getFileInfo', opts)
+}
+
 const ARRAY_BUFFER_BASE64_KEY = '__diminaArrayBufferBase64'
 const FILE_DATA_BASE64_KEY = '__diminaFileDataBase64'
 const FILE_DATA_TYPE_KEY = '__diminaFileDataType'
