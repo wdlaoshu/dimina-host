@@ -374,6 +374,7 @@ public class DMPPageController: UIViewController {
         let appIconView = UIView()
         appIconView.backgroundColor = loadingIconColor(for: webview.appName)
         appIconView.layer.cornerRadius = 20
+        appIconView.clipsToBounds = true
         appIconView.translatesAutoresizingMaskIntoConstraints = false
 
         let rotorView = UIView()
@@ -383,13 +384,6 @@ public class DMPPageController: UIViewController {
         dotView.backgroundColor = .systemGreen
         dotView.layer.cornerRadius = 3
         dotView.translatesAutoresizingMaskIntoConstraints = false
-
-        let initialLabel = UILabel()
-        initialLabel.text = String(webview.appName.prefix(1))
-        initialLabel.textColor = .white
-        initialLabel.font = .systemFont(ofSize: 16, weight: .bold)
-        initialLabel.textAlignment = .center
-        initialLabel.translatesAutoresizingMaskIntoConstraints = false
 
         let appNameLabel = UILabel()
         appNameLabel.text = webview.appName
@@ -405,7 +399,34 @@ public class DMPPageController: UIViewController {
         iconView.addSubview(appIconView)
         iconView.addSubview(rotorView)
         rotorView.addSubview(dotView)
-        appIconView.addSubview(initialLabel)
+
+        if let iconImage = appConfig.iconImage {
+            // 和胶囊菜单保持一致：有宿主下发的真实图标就直接展示，
+            // 不再退回首字母色块。
+            appIconView.backgroundColor = .clear
+            let iconImageView = UIImageView(image: iconImage)
+            iconImageView.contentMode = .scaleAspectFill
+            iconImageView.translatesAutoresizingMaskIntoConstraints = false
+            appIconView.addSubview(iconImageView)
+            NSLayoutConstraint.activate([
+                iconImageView.topAnchor.constraint(equalTo: appIconView.topAnchor),
+                iconImageView.leadingAnchor.constraint(equalTo: appIconView.leadingAnchor),
+                iconImageView.trailingAnchor.constraint(equalTo: appIconView.trailingAnchor),
+                iconImageView.bottomAnchor.constraint(equalTo: appIconView.bottomAnchor),
+            ])
+        } else {
+            let initialLabel = UILabel()
+            initialLabel.text = String(webview.appName.prefix(1))
+            initialLabel.textColor = .white
+            initialLabel.font = .systemFont(ofSize: 16, weight: .bold)
+            initialLabel.textAlignment = .center
+            initialLabel.translatesAutoresizingMaskIntoConstraints = false
+            appIconView.addSubview(initialLabel)
+            NSLayoutConstraint.activate([
+                initialLabel.centerXAnchor.constraint(equalTo: appIconView.centerXAnchor),
+                initialLabel.centerYAnchor.constraint(equalTo: appIconView.centerYAnchor),
+            ])
+        }
 
         NSLayoutConstraint.activate([
             stackView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
@@ -433,9 +454,6 @@ public class DMPPageController: UIViewController {
             dotView.centerYAnchor.constraint(equalTo: rotorView.topAnchor),
             dotView.widthAnchor.constraint(equalToConstant: 6),
             dotView.heightAnchor.constraint(equalToConstant: 6),
-
-            initialLabel.centerXAnchor.constraint(equalTo: appIconView.centerXAnchor),
-            initialLabel.centerYAnchor.constraint(equalTo: appIconView.centerYAnchor),
         ])
 
         let rotation = CABasicAnimation(keyPath: "transform.rotation.z")

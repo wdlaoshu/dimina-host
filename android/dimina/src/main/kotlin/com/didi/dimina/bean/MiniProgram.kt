@@ -21,6 +21,8 @@ data class MiniProgram(
     val referrerExtraData: String? = null,
     /** Bundled packages currently represent the release environment only. */
     val envVersion: String = "release",
+    /** 宿主下发的本地图标路径，仅用于启动加载页展示。 */
+    val iconPath: String? = null,
 ) : Parcelable {
 
     /** Keeps the original public seven-argument JVM constructor binary-compatible. */
@@ -58,6 +60,7 @@ data class MiniProgram(
         openerAppId = parcel.readString(),
         referrerExtraData = parcel.readString(),
         envVersion = parcel.readString() ?: "release",
+        iconPath = parcel.readString(),
     )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
@@ -72,6 +75,7 @@ data class MiniProgram(
         parcel.writeString(openerAppId)
         parcel.writeString(referrerExtraData)
         parcel.writeString(envVersion)
+        parcel.writeString(iconPath)
     }
 
     // 描述内容，通常返回 0

@@ -182,7 +182,10 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
     fun openApp(app: HostApp) {
         recentIds = RecentApps.record(context, app.appId)
         if (activity != null) {
-            Dimina.getInstance().startMiniProgram(activity, app.toMiniProgram())
+            Dimina.getInstance().startMiniProgram(
+                activity,
+                app.toMiniProgram(catalog.iconFileFor(app.appId)?.absolutePath),
+            )
         }
     }
 
@@ -690,14 +693,6 @@ private fun HostSearchBar(
             cursorBrush = SolidColor(HostPrimary),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { onSearch() }),
-            decorationBox = { inner ->
-                Box(contentAlignment = Alignment.CenterStart) {
-                    if (query.isEmpty()) {
-                        Text("搜索名称或 appId", color = HostMuted, fontSize = 15.sp)
-                    }
-                    inner()
-                }
-            },
         )
         if (query.isNotEmpty()) {
             IconButton(onClick = onClear, modifier = Modifier.size(28.dp)) {
@@ -1575,6 +1570,16 @@ private fun SettingsSheet(
             detail = "同步后自动下载并安装，下次打开生效",
             checked = catalog.config.autoInstall,
             onCheckedChange = { value -> catalog.updateConfig { it.copy(autoInstall = value) } },
+        )
+        Spacer(Modifier.height(8.dp))
+        ToggleRow(
+            title = "调试模式",
+            detail = "打开后小程序内显示 vConsole 调试面板，下次打开小程序生效",
+            checked = catalog.config.debugEnabled,
+            onCheckedChange = { value ->
+                catalog.updateConfig { it.copy(debugEnabled = value) }
+                runCatching { Dimina.getInstance().setDebugMode(value) }
+            },
         )
 
         Spacer(Modifier.height(16.dp))

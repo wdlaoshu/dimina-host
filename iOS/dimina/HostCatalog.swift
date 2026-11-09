@@ -103,6 +103,8 @@ struct HostCatalogConfig: Codable, Equatable {
     var autoCheck: Bool
     var wifiOnlyAutoDownload: Bool
     var autoInstall: Bool
+    /// 小程序调试面板（vConsole）开关，默认关闭，需要时在设置里打开。
+    var debugEnabled: Bool
 
     static let `default` = HostCatalogConfig(
         source: HostCatalogConfig.defaultSource,
@@ -111,7 +113,8 @@ struct HostCatalogConfig: Codable, Equatable {
         authPassword: "",
         autoCheck: true,
         wifiOnlyAutoDownload: true,
-        autoInstall: false
+        autoInstall: false,
+        debugEnabled: false
     )
 
     /// Overridable at build time by adding `DTHostCatalogURL` to Info.plist.
@@ -127,7 +130,8 @@ struct HostCatalogConfig: Codable, Equatable {
         authPassword: String,
         autoCheck: Bool,
         wifiOnlyAutoDownload: Bool,
-        autoInstall: Bool
+        autoInstall: Bool,
+        debugEnabled: Bool = false
     ) {
         self.source = source
         self.channel = channel
@@ -136,6 +140,7 @@ struct HostCatalogConfig: Codable, Equatable {
         self.autoCheck = autoCheck
         self.wifiOnlyAutoDownload = wifiOnlyAutoDownload
         self.autoInstall = autoInstall
+        self.debugEnabled = debugEnabled
     }
 
     /// Tolerate configs persisted before auth fields existed.
@@ -148,6 +153,7 @@ struct HostCatalogConfig: Codable, Equatable {
         autoCheck = try container.decodeIfPresent(Bool.self, forKey: .autoCheck) ?? true
         wifiOnlyAutoDownload = try container.decodeIfPresent(Bool.self, forKey: .wifiOnlyAutoDownload) ?? true
         autoInstall = try container.decodeIfPresent(Bool.self, forKey: .autoInstall) ?? false
+        debugEnabled = try container.decodeIfPresent(Bool.self, forKey: .debugEnabled) ?? false
     }
 }
 

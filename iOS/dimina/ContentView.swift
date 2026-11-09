@@ -264,11 +264,12 @@ struct ContentView: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundColor(HostTheme.muted)
 
-            TextField("搜索名称或 appId", text: $searchText)
+            TextField("", text: $searchText)
                 .font(.system(size: 15))
                 .foregroundColor(HostTheme.text)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .accessibilityLabel("搜索名称或 appId")
 
             if !searchText.isEmpty {
                 Button {
@@ -824,7 +825,7 @@ struct ContentView: View {
         }
 
         var appConfig = DMPAppConfig(appName: app.name, appId: app.appId)
-        appConfig.isDebugMode = true
+        appConfig.isDebugMode = catalog.config.debugEnabled
         appConfig.path = app.path
         appConfig.versionCode = app.versionCode
         appConfig.versionName = app.versionName
@@ -1450,6 +1451,15 @@ private struct HostSettingsSheet: View {
                     isOn: Binding(
                         get: { catalog.config.autoInstall },
                         set: { value in catalog.updateConfig { $0.autoInstall = value } }
+                    )
+                )
+
+                ToggleRow(
+                    title: "调试模式",
+                    detail: "打开后小程序内显示 vConsole 调试面板，下次打开小程序生效",
+                    isOn: Binding(
+                        get: { catalog.config.debugEnabled },
+                        set: { value in catalog.updateConfig { $0.debugEnabled = value } }
                     )
                 )
 

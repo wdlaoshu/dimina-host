@@ -127,7 +127,13 @@ class Dimina private constructor(context: Context) {
      * @return 是否为调试模式
      */
     fun isDebugMode(): Boolean {
-        return config.debugMode
+        return debugModeOverride ?: config.debugMode
+    }
+
+    /** 宿主设置里的调试开关，可运行时切换；之后新打开的页面会带上 vConsole。 */
+    fun setDebugMode(enabled: Boolean) {
+        debugModeOverride = enabled
+        LogUtils.initialize(enabled)
     }
 
     @MainThread
@@ -143,6 +149,10 @@ class Dimina private constructor(context: Context) {
     private val appContext: Context = context
     private val operationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var config: DiminaConfig
+
+    /** 设置页切换后的调试开关，null 表示沿用初始化配置。 */
+    @Volatile
+    private var debugModeOverride: Boolean? = null
 
     init {
         // 基础初始化逻辑

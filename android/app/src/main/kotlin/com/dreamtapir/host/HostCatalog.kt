@@ -78,6 +78,8 @@ data class HostCatalogConfig(
     val autoCheck: Boolean = true,
     val wifiOnlyAutoDownload: Boolean = true,
     val autoInstall: Boolean = false,
+    /** 小程序调试面板（vConsole）开关，默认关闭，需要时在设置里打开。 */
+    val debugEnabled: Boolean = false,
 ) {
     companion object {
         val Default = HostCatalogConfig()
@@ -169,6 +171,7 @@ object HostCatalogStore {
             autoCheck = prefs.getBoolean("auto_check", true),
             wifiOnlyAutoDownload = prefs.getBoolean("wifi_only", true),
             autoInstall = prefs.getBoolean("auto_install", false),
+            debugEnabled = prefs.getBoolean("debug_enabled", false),
         )
     }
 
@@ -182,6 +185,7 @@ object HostCatalogStore {
             .putBoolean("auto_check", config.autoCheck)
             .putBoolean("wifi_only", config.wifiOnlyAutoDownload)
             .putBoolean("auto_install", config.autoInstall)
+            .putBoolean("debug_enabled", config.debugEnabled)
             .apply()
     }
 
@@ -399,6 +403,9 @@ class HostCatalogController(
     // MARK: Icons
 
     private fun iconFile(appId: String): File = File(iconDir, appId.replace(Regex("[^A-Za-z0-9]"), "_") + ".png")
+
+    /** 已缓存到本地的应用图标，供宿主启动小程序时展示。 */
+    fun iconFileFor(appId: String): File? = iconFile(appId).takeIf { it.isFile }
 
     private fun loadCachedIcons() {
         val missing = remoteApps.filter { !icons.containsKey(it.appId) }

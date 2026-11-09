@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.res.Resources
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -35,6 +36,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -87,9 +89,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -1082,8 +1086,7 @@ class DiminaActivity : ComponentActivity() {
 
     private fun resetTabBarDynamicState(config: TabBarConfig?) {
         val listLength = config?.list?.size ?: 0
-        // 自定义 tabBar 时原生栏默认隐藏，由小程序 custom-tab-bar 组件自行渲染。
-        tabBarVisible.value = config?.custom != true
+        tabBarVisible.value = true
         tabBarBadges.value = List(listLength) { "" }
         tabBarRedDots.value = List(listLength) { false }
     }
@@ -1143,10 +1146,7 @@ class DiminaActivity : ComponentActivity() {
 
     fun showTabBar() {
         runOnUiThread {
-            // 自定义 tabBar 应用始终隐藏原生栏，避免 wx.showTabBar 把原生栏再叫出来。
-            if (tabBarConfigState.value?.custom != true) {
-                tabBarVisible.value = true
-            }
+            tabBarVisible.value = true
         }
     }
 
@@ -1745,6 +1745,8 @@ class DiminaActivity : ComponentActivity() {
         val tabBarConfig = tabBarConfigState.value
         val shouldShowTabBar = !isLoading.value &&
             tabBarConfig != null &&
+            // custom tabBar 由小程序的 custom-tab-bar 组件渲染，原生 tabBar 不参与显示
+            !tabBarConfig.custom &&
             tabBarVisible.value &&
             getTabBarIndex(currentPagePath.value) >= 0
         val statusBarHeight = ComposeWindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -2412,6 +2414,13 @@ class DiminaActivity : ComponentActivity() {
         val trackColor = remember { Color.LightGray.copy(alpha = 0.3f) }
         val dotColor = remember { Color(0xFF4CAF50) }
         val firstLetter = remember(miniProgram.name) { miniProgram.name.take(1).ifBlank { "小" } }
+        // 宿主有下发图标就直接用图标，和胶囊菜单保持一致；没有才退回首字母色块。
+        val appIcon = remember(miniProgram.iconPath) {
+            miniProgram.iconPath
+                ?.takeIf { File(it).isFile }
+                ?.let { BitmapFactory.decodeFile(it) }
+                ?.asImageBitmap()
+        }
 
         // 使用 InfiniteTransition 创建无限循环动画
         val infiniteTransition = rememberInfiniteTransition(label = "loadingRotation")
@@ -2456,12 +2465,14 @@ class DiminaActivity : ComponentActivity() {
                         val orbitRadius = circleRadius * 1.5f
                         val dotRadius = dotRadiusDp.toPx()
 
-                        // 绘制大圆（背景）
-                        drawCircle(
-                            color = iconColor,
-                            radius = circleRadius,
-                            center = Offset(centerX, centerY)
-                        )
+                        // 绘制大圆（背景），有真实图标时不再画色块
+                        if (appIcon == null) {
+                            drawCircle(
+                                color = iconColor,
+                                radius = circleRadius,
+                                center = Offset(centerX, centerY)
+                            )
+                        }
 
                         // 绘制轨道
                         drawCircle(
@@ -2483,13 +2494,25 @@ class DiminaActivity : ComponentActivity() {
                         )
                     }
 
-                    Text(
-                        text = firstLetter,
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.align(Alignment.Center)
-                    )
+                    if (appIcon != null) {
+                        Image(
+                            bitmap = appIcon,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .align(Alignment.Center)
+                        )
+                    } else {
+                        Text(
+                            text = firstLetter,
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
                 }
                 // 底部文本
                 Spacer(modifier = Modifier.height(8.dp))

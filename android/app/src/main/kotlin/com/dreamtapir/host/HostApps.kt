@@ -40,13 +40,14 @@ data class HostApp(
     val canUninstall: Boolean
         get() = installed
 
-    fun toMiniProgram(): MiniProgram = MiniProgram(
+    fun toMiniProgram(iconPath: String? = null): MiniProgram = MiniProgram(
         appId = appId,
         name = name,
         path = path,
         versionCode = versionCode,
         versionName = versionName,
         updateManifestUrl = updateManifestUrl,
+        iconPath = iconPath,
     )
 }
 
