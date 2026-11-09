@@ -15,6 +15,7 @@ struct ContentView: View {
     @StateObject private var catalog = HostCatalogCenter()
 
     @State private var searchText = ""
+    @FocusState private var searchFocused: Bool
     @State private var filter: HostFilter = .all
     @State private var selectedItem: HostHubItem?
     @State private var showSettings = false
@@ -269,6 +270,9 @@ struct ContentView: View {
                 .foregroundColor(HostTheme.text)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .focused($searchFocused)
+                .submitLabel(.search)
+                .onSubmit { searchFocused = false }
                 .accessibilityLabel("搜索名称或 appId")
 
             if !searchText.isEmpty {
@@ -369,6 +373,12 @@ struct ContentView: View {
             .padding(.bottom, 32)
         }
         .scrollIndicators(.hidden)
+        // 搜索框弹出键盘后，点列表空白处或拖动列表都要能收起键盘，
+        // 否则键盘会一直压在首页上。
+        .scrollDismissesKeyboard(.immediately)
+        .simultaneousGesture(
+            TapGesture().onEnded { searchFocused = false }
+        )
         .refreshable {
             await sync(force: true)
         }
