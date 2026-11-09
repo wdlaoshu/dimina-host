@@ -9,7 +9,7 @@ extension DMPUIIntegrationTests {
         private let api = InteractionAPI()
         private let env = DMPBridgeEnv(appIndex: -1, appId: "loading-sequence", webViewId: 1)
 
-        private func call(_ name: String, title: String = "Loading") {
+        private func call(_ name: String, title: String = "SequenceLoading") {
             let handler = name == "showLoading" ? api.showLoading : api.hideLoading
             _ = handler(DMPBridgeParam(value: ["title": title, "mask": true]), env, nil)
         }
@@ -21,12 +21,20 @@ extension DMPUIIntegrationTests {
                 }
             }
         }
-        private func windows() -> [UIWindow] {
-            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-                .flatMap(\.windows).filter { $0.windowLevel == .alert + 1 && !$0.isHidden }
+        private func rootViews() -> [UIView] {
+            UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap(\.windows)
+                .compactMap { $0.rootViewController?.view }
         }
-        private func contains(_ view: UIView, title: String) -> Bool {
-            (view as? UILabel)?.text == title || view.subviews.contains { contains($0, title: title) }
+        private func containsLabel(_ view: UIView, title: String) -> Bool {
+            (view as? UILabel)?.text == title || view.subviews.contains { containsLabel($0, title: title) }
+        }
+        /// Toast 现在直接挂在当前窗口的根视图上，覆盖层是根视图的直接子视图。
+        private func toastOverlays(title: String) -> [UIView] {
+            rootViews().flatMap { root in
+                root.subviews.filter { containsLabel($0, title: title) }
+            }
         }
         private func setAnimationSpeed(_ speed: Float, for layer: CALayer) {
             // Keep local time continuous: changing speed alone rewinds an active
@@ -37,21 +45,14 @@ extension DMPUIIntegrationTests {
             layer.speed = speed
             layer.beginTime = parentTime - (localTime - layer.timeOffset) / Double(speed)
         }
-        private func settleAnimations(expectingHidden: Bool = false) async throws {
+        /// 轮询等待某个 toast 状态稳定（出现或消失），同时推进主队列。
+        private func poll(timeout: TimeInterval = 10, _ condition: @MainActor () -> Bool) async throws {
             let clock = ContinuousClock()
-            let deadline = clock.now.advanced(by: .seconds(10))
-            while true {
-                // Commit queued UIKit animations before checking their actual state.
-                CATransaction.flush()
-                let visible = windows()
-                let animating = visible.contains { !($0.layer.animationKeys() ?? []).isEmpty }
-                if !animating && (!expectingHidden || visible.isEmpty) {
-                    await drainMainQueue() // Deliver any interrupted animation's completion.
-                    return
-                }
-                try #require(clock.now < deadline, "Toast windows did not settle: \(visible)")
-                // Yield for UIKit; elapsed time alone never satisfies this wait.
+            let deadline = clock.now.advanced(by: .seconds(timeout))
+            while !condition() {
+                try #require(clock.now < deadline, "Toast did not reach the expected state in time")
                 try await clock.sleep(for: .milliseconds(10))
+                await drainMainQueue()
             }
         }
 
@@ -59,47 +60,42 @@ extension DMPUIIntegrationTests {
         func secondLoadingSurvivesFirstHideAnimationAndCanBeHidden(animationSpeed: Float) async throws {
             call("showLoading", title: "First")
             await drainMainQueue()
-            let firstWindow = try #require(windows().first { contains($0, title: "First") })
+            let firstOverlay = try #require(toastOverlays(title: "First").first)
             // Exercise slower animation completion without blocking the main thread.
-            setAnimationSpeed(animationSpeed, for: firstWindow.layer)
-            defer { setAnimationSpeed(1, for: firstWindow.layer) }
-            try await settleAnimations()
-            #expect(windows().contains { contains($0, title: "First") })
+            setAnimationSpeed(animationSpeed, for: firstOverlay.layer)
+            defer { setAnimationSpeed(1, for: firstOverlay.layer) }
+
             call("hideLoading")
             await drainMainQueue() // Start fade-out, then replace it before completion.
             call("showLoading", title: "Second")
             await drainMainQueue()
-            try await settleAnimations()
-            let visible = windows().filter { contains($0, title: "Second") && $0.alpha == 1 }
-            #expect(visible.count == 1)
-            if let window = visible.first {
-                let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
-                    window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
-                }
-                let url = FileManager.default.temporaryDirectory.appendingPathComponent("loading-second-show.png")
-                try image.pngData()?.write(to: url)
-                print("LOADING_SCREENSHOT=\(url.path)")
-            }
+
+            // 淡出 0.25s（0.25 倍速下更久）结束后的 completion 不能把新的 loading 收掉。
+            try await ContinuousClock().sleep(for: .milliseconds(500))
+            await drainMainQueue()
+            let secondOverlays = toastOverlays(title: "Second")
+            #expect(secondOverlays.count == 1)
+            #expect(secondOverlays.first?.alpha == 1)
+            #expect(toastOverlays(title: "First").isEmpty)
+
             call("hideLoading")
             await drainMainQueue()
-            try await settleAnimations(expectingHidden: true)
-            #expect(windows().isEmpty)
+            try await poll { toastOverlays(title: "Second").isEmpty }
         }
 
         @Test func rapidDoubleCycleEndsHiddenAndNextShowWorks() async throws {
             call("showLoading"); call("hideLoading")
             call("showLoading"); call("hideLoading")
             await drainMainQueue()
-            try await settleAnimations(expectingHidden: true)
-            #expect(windows().isEmpty)
+            try await poll { toastOverlays(title: "SequenceLoading").isEmpty }
+
             call("showLoading", title: "Fresh")
             await drainMainQueue()
-            try await settleAnimations()
-            #expect(windows().filter { contains($0, title: "Fresh") }.count == 1)
+            #expect(toastOverlays(title: "Fresh").count == 1)
+
             call("hideLoading")
             await drainMainQueue()
-            try await settleAnimations(expectingHidden: true)
-            #expect(windows().isEmpty)
+            try await poll { toastOverlays(title: "Fresh").isEmpty }
         }
 
         @Test func oldToastTimeoutCannotHideReplacementLoading() async throws {
@@ -107,26 +103,30 @@ extension DMPUIIntegrationTests {
             await drainMainQueue()
             call("showLoading", title: "Persistent")
             await drainMainQueue()
-            try await settleAnimations()
-            #expect(windows().filter { contains($0, title: "Persistent") && $0.alpha == 1 }.count == 1)
+
+            // 50ms 的 toast 超时到期时，不能把后面替换上来的 loading 收掉。
+            try await ContinuousClock().sleep(for: .milliseconds(300))
+            await drainMainQueue()
+            let overlays = toastOverlays(title: "Persistent")
+            #expect(overlays.count == 1)
+            #expect(overlays.first?.alpha == 1)
+
             call("hideLoading")
             await drainMainQueue()
-            try await settleAnimations(expectingHidden: true)
-            #expect(windows().isEmpty)
+            try await poll { toastOverlays(title: "Persistent").isEmpty }
         }
 
-        @Test func repeatedShowReplacesThePreviousWindow() async throws {
+        @Test func repeatedShowReplacesThePreviousToast() async throws {
             call("showLoading", title: "Old")
             await drainMainQueue()
             call("showLoading", title: "New")
             await drainMainQueue()
-            try await settleAnimations()
-            #expect(windows().count == 1)
-            #expect(windows().contains { contains($0, title: "New") })
+            #expect(toastOverlays(title: "Old").isEmpty)
+            #expect(toastOverlays(title: "New").count == 1)
+
             call("hideLoading"); call("hideLoading")
             await drainMainQueue()
-            try await settleAnimations(expectingHidden: true)
-            #expect(windows().isEmpty)
+            try await poll { toastOverlays(title: "New").isEmpty }
         }
     }
 }
