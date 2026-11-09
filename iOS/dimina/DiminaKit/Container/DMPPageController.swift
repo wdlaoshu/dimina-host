@@ -559,6 +559,8 @@ public class DMPPageController: UIViewController {
         isClosingMiniProgram = true
 
         dismissMiniProgramMenu(animated: true)
+        // loading 遮罩现在挂在共享的导航容器上，关闭小程序时要一并收掉
+        ToastManager.shared.hideToast()
         navigator?.setCapsuleEnabled(false)
 
         guard let app else {
@@ -607,15 +609,37 @@ public class DMPPageController: UIViewController {
         }
         sheetView.layer.masksToBounds = true
 
-        let iconLabel = UILabel()
-        iconLabel.translatesAutoresizingMaskIntoConstraints = false
-        iconLabel.text = String(appConfig.appName.prefix(1)).isEmpty ? "小" : String(appConfig.appName.prefix(1))
-        iconLabel.textAlignment = .center
-        iconLabel.font = .systemFont(ofSize: 18, weight: .medium)
-        iconLabel.textColor = .secondaryLabel
-        iconLabel.backgroundColor = .secondarySystemBackground
-        iconLabel.layer.cornerRadius = 11
-        iconLabel.clipsToBounds = true
+        // 头像优先用宿主下发的真实小程序图标；拿不到时退回首字母占位
+        let avatarContainer = UIView()
+        avatarContainer.translatesAutoresizingMaskIntoConstraints = false
+        avatarContainer.backgroundColor = .secondarySystemBackground
+        avatarContainer.layer.cornerRadius = 11
+        avatarContainer.clipsToBounds = true
+
+        if let iconImage = appConfig.iconImage {
+            let avatarImageView = UIImageView(image: iconImage)
+            avatarImageView.translatesAutoresizingMaskIntoConstraints = false
+            avatarImageView.contentMode = .scaleAspectFill
+            avatarContainer.addSubview(avatarImageView)
+            NSLayoutConstraint.activate([
+                avatarImageView.topAnchor.constraint(equalTo: avatarContainer.topAnchor),
+                avatarImageView.bottomAnchor.constraint(equalTo: avatarContainer.bottomAnchor),
+                avatarImageView.leadingAnchor.constraint(equalTo: avatarContainer.leadingAnchor),
+                avatarImageView.trailingAnchor.constraint(equalTo: avatarContainer.trailingAnchor),
+            ])
+        } else {
+            let letterLabel = UILabel()
+            letterLabel.translatesAutoresizingMaskIntoConstraints = false
+            letterLabel.text = String(appConfig.appName.prefix(1)).isEmpty ? "小" : String(appConfig.appName.prefix(1))
+            letterLabel.textAlignment = .center
+            letterLabel.font = .systemFont(ofSize: 18, weight: .medium)
+            letterLabel.textColor = .secondaryLabel
+            avatarContainer.addSubview(letterLabel)
+            NSLayoutConstraint.activate([
+                letterLabel.centerXAnchor.constraint(equalTo: avatarContainer.centerXAnchor),
+                letterLabel.centerYAnchor.constraint(equalTo: avatarContainer.centerYAnchor),
+            ])
+        }
 
         let titleLabel = UILabel()
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -636,7 +660,7 @@ public class DMPPageController: UIViewController {
 
         let headerView = UIView()
         headerView.translatesAutoresizingMaskIntoConstraints = false
-        headerView.addSubview(iconLabel)
+        headerView.addSubview(avatarContainer)
         headerView.addSubview(titleStack)
 
         let topDivider = UIView()
@@ -646,12 +670,12 @@ public class DMPPageController: UIViewController {
         let symbolConfiguration = UIImage.SymbolConfiguration(pointSize: 22, weight: .medium)
 
         let reenterItem = makeMiniProgramMenuItem(
-            title: "重新进入\n小程序",
+            title: "刷新",
             image: UIImage(systemName: "arrow.clockwise", withConfiguration: symbolConfiguration),
             action: #selector(miniProgramMenuReenterTapped)
         )
         let closeItem = makeMiniProgramMenuItem(
-            title: "关闭小程序",
+            title: "关闭",
             image: UIImage(systemName: "xmark", withConfiguration: symbolConfiguration),
             action: #selector(miniProgramMenuCloseTapped)
         )
@@ -660,6 +684,7 @@ public class DMPPageController: UIViewController {
         actionStack.translatesAutoresizingMaskIntoConstraints = false
         actionStack.axis = .horizontal
         actionStack.alignment = .top
+        actionStack.distribution = .fillEqually
         actionStack.spacing = 8
 
         let bottomDivider = UIView()
@@ -697,12 +722,12 @@ public class DMPPageController: UIViewController {
             headerView.trailingAnchor.constraint(equalTo: sheetView.trailingAnchor),
             headerView.heightAnchor.constraint(equalToConstant: 88),
 
-            iconLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 24),
-            iconLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
-            iconLabel.widthAnchor.constraint(equalToConstant: 44),
-            iconLabel.heightAnchor.constraint(equalToConstant: 44),
+            avatarContainer.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 24),
+            avatarContainer.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            avatarContainer.widthAnchor.constraint(equalToConstant: 44),
+            avatarContainer.heightAnchor.constraint(equalToConstant: 44),
 
-            titleStack.leadingAnchor.constraint(equalTo: iconLabel.trailingAnchor, constant: 14),
+            titleStack.leadingAnchor.constraint(equalTo: avatarContainer.trailingAnchor, constant: 14),
             titleStack.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
             titleStack.trailingAnchor.constraint(lessThanOrEqualTo: headerView.trailingAnchor, constant: -24),
 
@@ -713,6 +738,7 @@ public class DMPPageController: UIViewController {
 
             actionStack.topAnchor.constraint(equalTo: topDivider.bottomAnchor, constant: 22),
             actionStack.leadingAnchor.constraint(equalTo: sheetView.leadingAnchor, constant: 20),
+            actionStack.trailingAnchor.constraint(equalTo: sheetView.trailingAnchor, constant: -20),
             actionStack.heightAnchor.constraint(equalToConstant: 96),
 
             bottomDivider.topAnchor.constraint(equalTo: actionStack.bottomAnchor, constant: 20),
@@ -758,18 +784,16 @@ public class DMPPageController: UIViewController {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
         label.text = title
-        label.font = .systemFont(ofSize: 12)
+        label.font = .systemFont(ofSize: 13)
         label.textColor = .secondaryLabel
         label.textAlignment = .center
-        label.numberOfLines = 2
+        label.numberOfLines = 1
 
         control.addSubview(iconContainer)
         iconContainer.addSubview(imageView)
         control.addSubview(label)
 
         NSLayoutConstraint.activate([
-            control.widthAnchor.constraint(equalToConstant: 88),
-
             iconContainer.topAnchor.constraint(equalTo: control.topAnchor),
             iconContainer.centerXAnchor.constraint(equalTo: control.centerXAnchor),
             iconContainer.widthAnchor.constraint(equalToConstant: 56),

@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 public struct DMPAppConfig : Identifiable {
     var appName: String
@@ -24,6 +25,8 @@ public struct DMPAppConfig : Identifiable {
 
     var color: Color?
     var icon: String?
+    /// 宿主下发的真实小程序图标（来自宿主 catalog 缓存），胶囊菜单里展示用
+    var iconImage: UIImage?
 
     // 符合Identifiable协议的id属性
     public var id: String { appId }

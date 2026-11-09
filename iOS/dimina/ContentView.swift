@@ -829,6 +829,8 @@ struct ContentView: View {
         appConfig.versionCode = app.versionCode
         appConfig.versionName = app.versionName
         appConfig.updateManifestUrl = app.updateManifestUrl
+        // 胶囊菜单里展示小程序自己的头像，复用首页已经缓存好的图标
+        appConfig.iconImage = catalog.icons[app.appId]
 
         let manager = DMPAppManager.sharedInstance()
         let dmpApp = manager.appWithConfig(appConfig: appConfig)

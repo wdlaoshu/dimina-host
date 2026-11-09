@@ -25,8 +25,10 @@ public class ToastManager {
     
     // MARK: - Properties
     
-    /// Dedicated window for toast messages
-    private var toastWindow: UIWindow?
+    /// 承载遮罩和内容的覆盖层。Toast 直接挂在当前窗口的根视图上，
+    /// 不再单独建 .alert + 1 的高层窗口 —— 高层窗口会盖在系统相册 /
+    /// 图片选择器之上，选图时就是一层灰遮罩挡住照片、中间压着“处理中...”。
+    private var overlayView: UIView?
     
     /// Toast container view
     private var containerView: UIView?
@@ -55,29 +57,33 @@ public class ToastManager {
             self.dismissWorkItem?.cancel()
             self.dismissWorkItem = nil
             
-            // Invalidate the old fade/timeout before interrupting its animation. Reusing
-            // the window avoids overlapping UIKit appearance transitions on rapid shows.
+            // Invalidate the old fade/timeout before interrupting its animation.
             self.presentationGeneration &+= 1
             let generation = self.presentationGeneration
-            self.toastWindow?.layer.removeAllAnimations()
-            if self.toastWindow == nil { self.createToastWindow() }
-            self.toastWindow?.rootViewController?.view.subviews.forEach { $0.removeFromSuperview() }
+            self.overlayView?.layer.removeAllAnimations()
+            self.overlayView?.removeFromSuperview()
+            self.overlayView = nil
             self.containerView = nil
-            
+
+            guard let hostView = self.resolveHostView() else { return }
+            let overlay = UIView(frame: hostView.bounds)
+            overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            overlay.backgroundColor = .clear
+            overlay.alpha = 0
+            overlay.isUserInteractionEnabled = false // Pass through touches
+            hostView.addSubview(overlay)
+            self.overlayView = overlay
+
             // Create toast content
-            self.createToastContent(title: title, type: type, mask: mask)
-            
-            // Make the window visible
-            self.toastWindow?.isHidden = false
-            
+            self.createToastContent(in: overlay, title: title, type: type, mask: mask)
+
             // Auto-dismiss if not loading type
             if type != .loading && duration > 0 {
                 let durationInSeconds = Double(duration) / 1000.0
                 
                 // Create a new work item for dismissal
-                let window = self.toastWindow
-                let workItem = DispatchWorkItem { [weak self, weak window] in
-                    guard let self, let window, self.toastWindow === window,
+                let workItem = DispatchWorkItem { [weak self, weak overlay] in
+                    guard let self, let overlay, self.overlayView === overlay,
                           self.presentationGeneration == generation else { return }
                     self.hideToastOnMainThread()
                 }
@@ -99,55 +105,33 @@ public class ToastManager {
     private func hideToastOnMainThread() {
         dismissWorkItem?.cancel()
         dismissWorkItem = nil
-        guard let window = toastWindow else { return }
+        guard let overlay = overlayView else { return }
         presentationGeneration &+= 1
-        let generation = presentationGeneration
-        UIView.animate(withDuration: 0.3, delay: 0, options: [.beginFromCurrentState], animations: {
-            window.alpha = 0
-        }) { [weak self] _ in
-            guard let self, self.presentationGeneration == generation,
-                  self.toastWindow === window else { return }
-            window.isHidden = true
-            self.toastWindow = nil
-            self.containerView = nil
+        overlayView = nil
+        containerView = nil
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState], animations: {
+            overlay.alpha = 0
+        }) { _ in
+            overlay.removeFromSuperview()
         }
     }
 
     // MARK: - Private Methods
     
-    /// Create a dedicated window for the toast
-    private func createToastWindow() {
-        // Create a new window
-        if #available(iOS 13.0, *) {
-            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-                let window = UIWindow(windowScene: windowScene)
-                window.windowLevel = .alert + 1 // Above alerts
-                window.backgroundColor = .clear
-                window.isUserInteractionEnabled = false // Pass through touches
-                self.toastWindow = window
-            }
-        } else {
-            let window = UIWindow(frame: UIScreen.main.bounds)
-            window.windowLevel = .alert + 1 // Above alerts
-            window.backgroundColor = .clear
-            window.isUserInteractionEnabled = false // Pass through touches
-            self.toastWindow = window
-        }
-        
-        // Set up the root view controller (required for window)
-        let viewController = UIViewController()
-        viewController.view.backgroundColor = .clear
-        self.toastWindow?.rootViewController = viewController
-        self.toastWindow?.alpha = 0
+    /// Toast 贴在当前窗口的根视图里，跟随窗口的视图层级：
+    /// 系统相册、图片选择器、权限弹窗等模态出现时会自然盖住它，
+    /// 不会再出现遮罩挡住图片、上层窗口点不动的问题。
+    private func resolveHostView() -> UIView? {
+        guard let window = DMPUIManager.getCurrentWindow() else { return nil }
+        return window.rootViewController?.view ?? window
     }
     
     /// Create the toast content
-    private func createToastContent(title: String, type: ToastType, mask: Bool) {
-        guard let window = self.toastWindow, let rootView = window.rootViewController?.view else { return }
-        
+    private func createToastContent(in rootView: UIView, title: String, type: ToastType, mask: Bool) {
         // Add mask if needed
         if mask {
             let maskView = UIView(frame: rootView.bounds)
+            maskView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             maskView.backgroundColor = UIColor.black.withAlphaComponent(0.3)
             rootView.addSubview(maskView)
         }
@@ -234,7 +218,7 @@ public class ToastManager {
         
         // Animate in
         UIView.animate(withDuration: 0.3) {
-            window.alpha = 1
+            rootView.alpha = 1
         }
     }
     
