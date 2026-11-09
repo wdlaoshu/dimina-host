@@ -29,6 +29,12 @@ public class ActionSheetManager {
     /// Background view for dimming
     private var backgroundView: UIView?
     
+    /// Completion handler for the currently visible action sheet.
+    /// Stored separately from the item buttons so a background-tap cancel
+    /// can also deliver the result instead of dropping the callback
+    /// (which would leave the JS promise pending forever).
+    private var currentCompletion: ActionSheetCompletionHandler?
+    
     /// Private initializer to enforce singleton pattern
     private init() {}
     
@@ -47,6 +53,8 @@ public class ActionSheetManager {
         // Ensure UI updates happen on the main thread
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
+            
+            self.currentCompletion = completion
             
             // Create a dedicated window for the action sheet
             self.createActionSheetWindow()
@@ -85,6 +93,7 @@ public class ActionSheetManager {
                 self.actionSheetWindow = nil
                 self.containerView = nil
                 self.backgroundView = nil
+                self.currentCompletion = nil
                 
                 // Call completion handler
                 completion?(selectedIndex)
@@ -239,6 +248,9 @@ public class ActionSheetManager {
     }
     
     @objc private func backgroundTapped() {
-        hideActionSheet(selectedIndex: -1, completion: nil) // -1 indicates cancel
+        // 点背景取消也要把结果回调给调用方（selectedIndex = -1），
+        // 否则 chooseMedia/chooseVideo 等 API 的 bridge 回调永远不会触发，
+        // JS 侧 promise 一直 pending，页面卡在 loading 无法恢复。
+        hideActionSheet(selectedIndex: -1, completion: currentCompletion)
     }
 }

@@ -98,8 +98,10 @@ class DMPNetwork {
         }
         
         // 使用Alamofire发送请求
+        // 注意：不能调用 .validate()。微信小程序语义里 HTTP 状态码（含 4xx/5xx）
+        // 属于成功回调（通过 statusCode 透出），只有网络层错误才走 fail。
+        // 否则像 401 会被 Alamofire 判为 failure，业务侧无法做 token 刷新。
         AF.request(request)
-            .validate()
             .responseData { response in
                 // 记录网络请求过程信息（可以扩展更多指标）
                 let profile = ["timestamp": Date().timeIntervalSince1970]
@@ -182,7 +184,6 @@ class DMPNetwork {
         AF.download(url, method: .get, headers: headers, requestModifier: { request in
             request.timeoutInterval = timeout
         }, to: destination)
-        .validate()
         .responseURL { response in
             switch response.result {
             case .success(_):

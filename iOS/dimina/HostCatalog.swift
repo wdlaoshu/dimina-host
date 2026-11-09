@@ -495,6 +495,13 @@ final class HostCatalogCenter: ObservableObject {
             loadCachedIcons()
             downloadMissingIcons()
         } catch {
+            // 下拉刷新被新一轮刷新/页面切换取消是正常行为，静默忽略，
+            // 不要当成同步失败弹 toast（否则用户会看到 "cancelled"）。
+            // 同时要把 syncState 从 .syncing 恢复，否则后续刷新会被并发保护永远拦截。
+            if error is CancellationError || (error as NSError).code == NSURLErrorCancelled {
+                syncState = lastSync.map { .ok($0) } ?? .idle
+                return
+            }
             let message = Self.describe(error)
             catalogError = message
             syncState = .failed(message)
