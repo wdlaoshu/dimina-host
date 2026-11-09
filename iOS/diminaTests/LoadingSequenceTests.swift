@@ -70,13 +70,12 @@ extension DMPUIIntegrationTests {
             call("showLoading", title: "Second")
             await drainMainQueue()
 
-            // 淡出 0.25s（0.25 倍速下更久）结束后的 completion 不能把新的 loading 收掉。
-            try await ContinuousClock().sleep(for: .milliseconds(500))
-            await drainMainQueue()
+            // 淡出结束后的 completion 不能把新的 loading 收掉：旧覆盖层淡出消失，
+            // 新 loading 必须还在（0.25 倍速下淡出会拉到 1s 左右）。
+            try await poll { toastOverlays(title: "First").isEmpty }
             let secondOverlays = toastOverlays(title: "Second")
             #expect(secondOverlays.count == 1)
             #expect(secondOverlays.first?.alpha == 1)
-            #expect(toastOverlays(title: "First").isEmpty)
 
             call("hideLoading")
             await drainMainQueue()
