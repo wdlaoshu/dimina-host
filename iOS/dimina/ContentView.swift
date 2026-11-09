@@ -67,7 +67,6 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .preferredColorScheme(.light)
         .task {
             permissions.refresh()
             autoOpenAppForTestIfRequested()
@@ -2077,6 +2076,15 @@ enum HostThemeMode: String, CaseIterable {
         case .light: return .light
         case .dark: return .dark
         case .system: return .unspecified
+        }
+    }
+
+    /// SwiftUI 场景下的外观覆盖；system 返回 nil 表示跟随系统。
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .light: return .light
+        case .dark: return .dark
+        case .system: return nil
         }
     }
 }

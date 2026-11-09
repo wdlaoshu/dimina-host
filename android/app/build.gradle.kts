@@ -1,4 +1,4 @@
-plugins {
+﻿plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
 }
@@ -17,8 +17,8 @@ android {
         applicationId = "com.dreamtapir.host"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.0.7"
+        versionCode = 8
+        versionName = "1.0.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         

@@ -90,7 +90,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -160,7 +160,9 @@ private val HostDarkPalette = HostPalette(
     red = Color(0xFFFF6469),
 )
 
-private val LocalHostPalette = staticCompositionLocalOf { HostLightPalette }
+// 主题色运行时会切换，必须用会跟踪读取的 compositionLocalOf；
+// staticCompositionLocalOf 不跟踪读取，palette 变化时读取处不重组，界面不换色。
+private val LocalHostPalette = compositionLocalOf { HostLightPalette }
 
 private val HostBg: Color @Composable get() = LocalHostPalette.current.bg
 private val HostSurface: Color @Composable get() = LocalHostPalette.current.surface
