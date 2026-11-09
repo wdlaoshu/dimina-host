@@ -13,6 +13,9 @@ import { mergeSourcemap, remapSourcemap } from './sourcemap.js'
 // 用于缓存已处理的模块
 const processedModules = new Set()
 
+// 全局图片路径映射（原始路径 → static 产物路径），供运行时 resolve helper 注入
+const localImageMap = new Map()
+
 // 是否生成 sourcemap
 let enableSourcemap = false
 let sourcemapTargetPath = null
@@ -87,6 +90,13 @@ async function writeCompileRes(compileRes, root) {
 		fs.mkdirSync(outputDir, { recursive: true })
 	}
 
+	// 注入运行时图片路径 resolve helper：把 localImageMap 里的原始路径→static 路径映射打包
+	let runtimeAssetHelper = ''
+	if (localImageMap.size > 0) {
+		const mapJson = JSON.stringify(Object.fromEntries(localImageMap.entries()))
+		runtimeAssetHelper = `(function(){var m=${mapJson};globalThis.__dmTL=function(s){return m[s]||s;};})();`
+	}
+
 	/*
 	 * sourcemap 模式跳过 minify：
 	 * 当前 mergeSourcemap 只做单层行偏移拼接，
@@ -107,11 +117,11 @@ async function writeCompileRes(compileRes, root) {
 		})
 		const { bundleCode, sourcemap } = mergeSourcemap(rebasedCompileRes)
 		const sourcemapFileName = 'logic.js.map'
-		fs.writeFileSync(`${outputDir}/logic.js`, `${bundleCode}//# sourceMappingURL=${sourcemapFileName}\n`)
+		fs.writeFileSync(`${outputDir}/logic.js`, `${runtimeAssetHelper}${bundleCode}//# sourceMappingURL=${sourcemapFileName}\n`)
 		fs.writeFileSync(`${outputDir}/${sourcemapFileName}`, sourcemap)
 	}
 	else {
-		let mergeCode = ''
+		let mergeCode = runtimeAssetHelper
 		for (const module of compileRes) {
 			const amdFormat = `modDefine('${module.path}', function(require, module, exports) {
 ${module.code}
@@ -277,6 +287,7 @@ async function buildJSByPath(packageName, module, compileRes, mainCompileRes, ad
 
 	// 收集需要修改的路径信息和依赖模块
 	const pathReplacements = []
+	const templateWrapReplacements = []
 	const dependenciesToProcess = []
 
 	walk(ast, {
@@ -296,11 +307,110 @@ async function buildJSByPath(packageName, module, compileRes, mainCompileRes, ad
 					resolveAssetSourcePath(getWorkPath(), modulePath, node.value),
 					'logic',
 				)
+				const replacement = collectAssets(getWorkPath(), modulePath, node.value, getTargetPath(), getAppId())
 				pathReplacements.push({
 					start: node.start,
 					end: node.end,
-					newValue: collectAssets(getWorkPath(), modulePath, node.value, getTargetPath(), getAppId()),
+					newValue: replacement,
 				})
+				localImageMap.set(node.value, replacement.replace(/^'|'$/g, ''))
+			}
+
+			// 处理模板字符串里的本地图片路径
+			if (node.type === 'TemplateLiteral') {
+				const quasis = node.quasis || []
+
+				// 无表达式的模板字符串，整体当作 StringLiteral 处理
+				if (node.expressions.length === 0 && quasis.length === 1) {
+					const value = quasis[0]?.value?.cooked ?? quasis[0]?.value?.raw ?? ''
+					if (isLocalAssetString(value)) {
+						getDependencyGraph().addFile(
+							currentPath,
+							resolveAssetSourcePath(getWorkPath(), modulePath, value),
+							'logic',
+						)
+						const replacement = collectAssets(getWorkPath(), modulePath, value, getTargetPath(), getAppId())
+						pathReplacements.push({
+							start: node.start,
+							end: node.end,
+							newValue: replacement,
+						})
+						localImageMap.set(value, replacement.replace(/^'|'$/g, ''))
+					}
+				}
+				else {
+					// 有表达式的模板字符串：逐个 TemplateElement 检查完整路径片段
+					let looksLikeImageTemplate = false
+					for (const quasi of quasis) {
+						const cooked = quasi.value?.cooked ?? quasi.value?.raw ?? ''
+						if (!cooked) continue
+
+						// TemplateElement 本身就是一张完整图片（比如被两个 expression 夹在中间）
+						if (isLocalAssetString(cooked) && quasi.start != null && quasi.end != null) {
+							getDependencyGraph().addFile(
+								currentPath,
+								resolveAssetSourcePath(getWorkPath(), modulePath, cooked),
+								'logic',
+							)
+							const replacement = collectAssets(getWorkPath(), modulePath, cooked, getTargetPath(), getAppId())
+							pathReplacements.push({
+								start: quasi.start,
+								end: quasi.end,
+								newValue: replacement,
+							})
+							localImageMap.set(cooked, replacement.replace(/^'|'$/g, ''))
+						}
+
+						// 静态片段以 `/` 开头且看起来像路径（前缀或后缀都算）→ 整个模板字符串需要运行时 resolve
+						if (cooked.startsWith('/images/') || cooked.startsWith('./images/') || cooked.startsWith('../images/')) {
+							looksLikeImageTemplate = true
+						}
+						else if ((cooked.startsWith('/') || cooked.startsWith('./') || cooked.startsWith('../')) && /\.[a-z0-9]+$/i.test(cooked)) {
+							// 以路径前缀开头且以文件后缀结尾
+							looksLikeImageTemplate = true
+						}
+					}
+
+					// 整段用 __dmTL 包裹，运行时拼完字符串再过 resolve helper
+					if (looksLikeImageTemplate && node.start != null && node.end != null) {
+						templateWrapReplacements.push({
+							start: node.start,
+							end: node.end,
+						})
+
+						// 扫描目录把所有可能被拼出来的变体都 collect + 放进 localImageMap
+						// 比如 `/images/icon-user${suffix}.svg` 需要同时收集 icon-user.svg 和 icon-user-dark.svg
+						const { dir, ext } = extractImageScanParams(quasis)
+						if (dir && ext) {
+							const workPath = getWorkPath()
+							const dirAbs = resolveAssetSourcePath(workPath, modulePath, dir)
+							try {
+								if (fs.existsSync(dirAbs)) {
+									const files = fs.readdirSync(dirAbs).filter(f =>
+										f.toLowerCase().endsWith(ext)
+									)
+									for (const file of files) {
+										const fullSrc = dir.replace(/\/$/, '') + '/' + file
+										if (!localImageMap.has(fullSrc)) {
+											getDependencyGraph().addFile(
+												currentPath,
+												resolveAssetSourcePath(workPath, modulePath, fullSrc),
+												'logic',
+											)
+											const replacement = collectAssets(
+												workPath, modulePath, fullSrc, getTargetPath(), getAppId()
+											)
+											localImageMap.set(fullSrc, replacement.replace(/^'|'$/g, ''))
+										}
+									}
+								}
+							}
+							catch (_) {
+								// 目录不存在或读取失败，忽略 —— __dmTL 兜底返回原值
+							}
+						}
+					}
+				}
 			}
 
 			// 处理 require() 调用
@@ -421,6 +531,12 @@ async function buildJSByPath(packageName, module, compileRes, mainCompileRes, ad
 		s.overwrite(replacement.start, replacement.end, `'${replacement.newValue}'`)
 	}
 
+	// 给被表达式断开的图片路径模板字符串加 runtime resolve 包裹
+	for (const wrap of templateWrapReplacements.reverse()) {
+		s.appendRight(wrap.end, ')')
+		s.appendLeft(wrap.start, '__dmTL(')
+	}
+
 	const modifiedCode = s.toString()
 	let preEsbuildMap = null
 	if (enableSourcemap && compileInfo.sourceFile) {
@@ -482,6 +598,47 @@ function isLocalAssetString(value) {
 		&& isCollectableImageAsset(value)
 }
 
+/**
+ * 从 TemplateLiteral 的 quasis 里提取图片扫描参数：{ dir, ext }
+ * - dir: 能确定的目录前缀（如 '/images/'），用于扫描所有可能被模板字符串拼出来的变体
+ * - ext: 能确定的文件扩展名（如 '.svg'）
+ * 返回 null 表示无法提取足够信息（放弃收集，仅靠 __dmTL 兜底）
+ */
+function extractImageScanParams(quasis) {
+	const extPattern = /\.(svg|png|jpe?g|gif|webp|heic|heif)/i
+	let dir = null
+	let ext = null
+
+	for (const quasi of quasis) {
+		const cooked = quasi?.value?.cooked ?? quasi?.value?.raw ?? ''
+		if (!cooked) continue
+
+		// 提取扩展名
+		const m = cooked.match(extPattern)
+		if (m && !ext) {
+			ext = m[0].toLowerCase()
+		}
+
+		// 提取目录（第一个以路径前缀开头的片段）
+		if (!dir) {
+			const pathStart = cooked.match(/^(\/images\/|\.\/images\/|\.\.\/images\/|\/|\.\/|\.\.)/)
+			if (pathStart) {
+				const prefix = pathStart[1]
+				const afterPrefix = cooked.slice(prefix.length)
+				const slashIdx = afterPrefix.lastIndexOf('/')
+				if (slashIdx >= 0) {
+					dir = prefix + afterPrefix.slice(0, slashIdx + 1)
+				}
+				else {
+					dir = prefix
+				}
+			}
+		}
+	}
+
+	return { dir, ext }
+}
+
 function getLineByIndex(content, index) {
 	if (typeof index !== 'number' || index < 0) {
 		return null
@@ -533,16 +690,18 @@ function resolveDependencyId(specifier, modulePath, allowAbsolute) {
 	}
 
 	if (specifier.startsWith('./') || specifier.startsWith('../')) {
+		const resolved = resolveRelativeModuleId(specifier, modulePath)
 		return {
-			id: resolveRelativeModuleId(specifier, modulePath),
-			shouldProcess: true,
+			id: resolved || specifier,
+			shouldProcess: !!resolved,
 		}
 	}
 
 	if (specifier.startsWith('/')) {
+		const absResolved = allowAbsolute ? normalizeModuleId(specifier) : resolveRelativeModuleId(specifier, modulePath)
 		return {
-			id: allowAbsolute ? normalizeModuleId(specifier) : resolveRelativeModuleId(specifier, modulePath),
-			shouldProcess: true,
+			id: absResolved || specifier,
+			shouldProcess: !!absResolved,
 		}
 	}
 
@@ -580,6 +739,10 @@ function isBareModuleSpecifier(specifier) {
 function resolveRelativeModuleId(specifier, modulePath) {
 	const requireFullPath = resolve(modulePath, `../${specifier}`)
 	const relativeId = requireFullPath.split(`${getWorkPath()}${sep}`)[1]
+	if (!relativeId) {
+		// 路径不在项目根目录下，直接返回原始 specifier 让调用方决定是否跳过
+		return null
+	}
 	return normalizeModuleId(relativeId)
 }
 
