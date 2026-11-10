@@ -93,9 +93,10 @@ final class DMPTabBarContainerController: UIViewController {
         applyStatusBarStyleForCurrentTab()
     }
 
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        // 离开小程序后把整窗外观还给宿主
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // 必须赶在退场动画开始前把外观还给宿主：等到 viewDidDisappear 才切换，
+        // 动画期间露出的宿主还是小程序那一档浅色，切完再变深，看起来就是闪白。
         let stack = navigationController?.viewControllers ?? []
         let stillInside = stack.contains {
             $0 is DMPPageController || $0 is DMPTabBarContainerController

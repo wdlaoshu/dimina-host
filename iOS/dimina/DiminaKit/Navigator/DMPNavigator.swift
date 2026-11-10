@@ -913,6 +913,8 @@ public class DMPNavigator: NSObject {
         navigationController.view.endEditing(true)
         notifyPresentOut()
         setCapsuleVisible(false)
+        // 先把整窗外观还给宿主再起转场，避免退场动画期间露出浅色首页、动画结束才变深（闪白）
+        DMPUIManager.notifyMiniProgramInterfaceStyle(.unspecified)
         let hostControllers = hostViewControllers(in: navigationController)
         clearMiniProgramPageState(reason: .exit)
 
@@ -934,6 +936,8 @@ public class DMPNavigator: NSObject {
         navigationController.view.endEditing(true)
         notifyPresentOut()
         setCapsuleVisible(false)
+        // 先把整窗外观还给宿主再起转场，避免退场动画期间露出浅色首页、动画结束才变深（闪白）
+        DMPUIManager.notifyMiniProgramInterfaceStyle(.unspecified)
         let hostControllers = hostViewControllers(in: navigationController)
         retainedControllers = ownedViewControllers(in: navigationController)
         guard !retainedControllers.isEmpty else { return }

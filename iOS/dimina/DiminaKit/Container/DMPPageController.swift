@@ -166,6 +166,13 @@ public class DMPPageController: UIViewController {
         loadingView?.superview?.bringSubviewToFront(loadingView!)
     }
 
+    public override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // 必须赶在退场动画开始前把外观还给宿主：等到 viewDidDisappear 才切换，
+        // 动画期间露出的宿主还是小程序那一档浅色，切完再变深，看起来就是闪白。
+        notifyHostStyleIfLeavingMiniProgram()
+    }
+
     // View did appear
     public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -1387,8 +1394,6 @@ public class DMPPageController: UIViewController {
             // Page is removed from navigation stack
             destroyWebView()
         }
-
-        notifyHostStyleIfLeavingMiniProgram()
     }
     
     // Destroy WebView
