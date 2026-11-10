@@ -6,7 +6,12 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -20,9 +25,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -32,9 +39,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -49,7 +62,6 @@ import com.didi.dimina.api.BaseApiHandler
 import com.didi.dimina.api.NoneResult
 import com.didi.dimina.common.ApiUtils
 import com.didi.dimina.ui.container.DiminaActivity
-import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 private const val MODAL_MAX_HEIGHT_FRACTION = 0.9f
@@ -374,63 +386,82 @@ fun ToastContent(
     icon: String?,
     duration: Long,
 ) {
-    // Auto-dismiss after duration
-    LaunchedEffect(Unit) {
-        delay(duration)
-    }
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
 
+    val alpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(durationMillis = 160),
+        label = "toastAlpha",
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (visible) 1f else 0.94f,
+        animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow),
+        label = "toastScale",
+    )
+
+    val hasBadge = icon == "success" || icon == "error" || icon == "loading"
+    val shape = RoundedCornerShape(18.dp)
+
+    // 深色毛玻璃卡片：宽度随文案自适应，不再固定 120x120 的灰方块。
+    Row(
+        modifier = Modifier
+            .widthIn(min = if (hasBadge) 108.dp else 84.dp, max = 300.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                this.alpha = alpha
+            }
+            .shadow(18.dp, shape)
+            .background(Color(0xF01F1F22), shape)
+            .border(1.dp, Color.White.copy(alpha = 0.12f), shape)
+            .padding(
+                start = if (hasBadge) 15.dp else 20.dp,
+                end = if (hasBadge) 18.dp else 20.dp,
+                top = 13.dp,
+                bottom = 13.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        when (icon) {
+            "success" -> ToastBadge(tint = Color(0xFF34C759), drawableRes = R.drawable.ic_success)
+            "error" -> ToastBadge(tint = Color(0xFFFF453A), drawableRes = R.drawable.ic_error)
+            "loading" -> CircularProgressIndicator(
+                color = Color.White,
+                modifier = Modifier.size(22.dp),
+                strokeWidth = 2.dp,
+            )
+
+            else -> Unit
+        }
+
+        Text(
+            text = title,
+            color = Color.White.copy(alpha = 0.96f),
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = if (hasBadge) TextAlign.Start else TextAlign.Center,
+            maxLines = 4,
+        )
+    }
+}
+
+/** 语义色圆底 + 白色符号，和宿主壳的提示样式保持一致。 */
+@Composable
+private fun ToastBadge(tint: Color, drawableRes: Int) {
     Box(
         modifier = Modifier
-            .size(120.dp, 120.dp)
-            .background(Color(0xFF333333), RoundedCornerShape(8.dp)),
-        contentAlignment = Alignment.Center
+            .size(22.dp)
+            .background(tint.copy(alpha = 0.2f), CircleShape),
+        contentAlignment = Alignment.Center,
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(20.dp)
-        ) {
-            // Icon or Image
-            when (icon) {
-                "success" -> {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_success),
-                        contentDescription = "Success",
-                        tint = Color.White,
-                        modifier = Modifier.size(40.dp)
-                    )
-                }
-
-                "error" -> {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_error),
-                        contentDescription = "Error",
-                        tint = Color.White,
-                        modifier = Modifier.size(40.dp)
-                    )
-                }
-
-                "loading" -> {
-                    CircularProgressIndicator(
-                        color = Color.White,
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 2.dp
-                    )
-                }
-
-                else -> {
-                    // No icon for "none" or invalid values
-                }
-            }
-
-            // Title
-            Text(
-                text = title,
-                color = Color.White,
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center,
-                maxLines = if (icon == "success" || icon == "error" || icon == "loading") 1 else 2
-            )
-        }
+        Icon(
+            painter = painterResource(id = drawableRes),
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(13.dp),
+        )
     }
 }
 

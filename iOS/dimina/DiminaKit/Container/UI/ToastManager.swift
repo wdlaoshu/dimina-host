@@ -37,6 +37,13 @@ public class ToastManager {
     private var dismissWorkItem: DispatchWorkItem?
     private var presentationGeneration: UInt64 = 0
     
+    // MARK: - Layout constants
+
+    private let cornerRadius: CGFloat = 18
+    private let badgeSize: CGFloat = 22
+    private let contentSpacing: CGFloat = 10
+    private let maxWidth: CGFloat = 300
+
     /// Private initializer to enforce singleton pattern
     private init() {}
     
@@ -109,7 +116,7 @@ public class ToastManager {
         presentationGeneration &+= 1
         overlayView = nil
         containerView = nil
-        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState], animations: {
+        UIView.animate(withDuration: 0.22, delay: 0, options: [.beginFromCurrentState], animations: {
             overlay.alpha = 0
         }) { _ in
             overlay.removeFromSuperview()
@@ -126,152 +133,160 @@ public class ToastManager {
         return window.rootViewController?.view ?? window
     }
     
-    /// Create the toast content
-    private func createToastContent(in rootView: UIView, title: String, type: ToastType, mask: Bool) {
+    /// 深色毛玻璃卡片 + 语义色图标：宽度随文案自适应，
+    /// 不再固定 120x120 的灰方块，长文案也不会被挤成三行。
+    private func createToastContent(in overlay: UIView, title: String, type: ToastType, mask: Bool) {
         // Add mask if needed
         if mask {
-            let maskView = UIView(frame: rootView.bounds)
+            let maskView = UIView(frame: overlay.bounds)
             maskView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            maskView.backgroundColor = UIColor.black.withAlphaComponent(0.3)
-            rootView.addSubview(maskView)
+            maskView.backgroundColor = UIColor.black.withAlphaComponent(0.24)
+            overlay.addSubview(maskView)
         }
-        
-        // Create toast container
+
         let container = UIView()
-        container.backgroundColor = UIColor(red: 76/255.0, green: 76/255.0, blue: 76/255.0, alpha: 1.0) // #4c4c4c color
-        container.layer.cornerRadius = 10
-        container.clipsToBounds = true
         container.translatesAutoresizingMaskIntoConstraints = false
-        rootView.addSubview(container)
+        container.layer.cornerRadius = cornerRadius
+        container.layer.cornerCurve = .continuous
+        container.layer.shadowColor = UIColor.black.cgColor
+        container.layer.shadowOpacity = 0.22
+        container.layer.shadowRadius = 22
+        container.layer.shadowOffset = CGSize(width: 0, height: 10)
+        overlay.addSubview(container)
         self.containerView = container
-        
-        // Create content stack view
-        let stackView = UIStackView()
-        stackView.axis = .vertical
-        stackView.alignment = .center
-        stackView.spacing = 10
-        stackView.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(stackView)
-        
-        // Add icon based on type
-        switch type {
-        case .success:
-            let imageView = UIImageView()
-            imageView.image = self.createSuccessImage()
-            imageView.contentMode = .scaleAspectFit
-            imageView.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                imageView.widthAnchor.constraint(equalToConstant: 40),
-                imageView.heightAnchor.constraint(equalToConstant: 40)
-            ])
-            stackView.addArrangedSubview(imageView)
-            
-        case .error:
-            let imageView = UIImageView()
-            imageView.image = self.createErrorImage()
-            imageView.contentMode = .scaleAspectFit
-            imageView.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                imageView.widthAnchor.constraint(equalToConstant: 40),
-                imageView.heightAnchor.constraint(equalToConstant: 40)
-            ])
-            stackView.addArrangedSubview(imageView)
-            
-        case .loading:
-            let activityIndicator = UIActivityIndicatorView(style: .medium)
-            activityIndicator.color = .white
-            activityIndicator.startAnimating()
-            activityIndicator.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                activityIndicator.widthAnchor.constraint(equalToConstant: 40),
-                activityIndicator.heightAnchor.constraint(equalToConstant: 40)
-            ])
-            stackView.addArrangedSubview(activityIndicator)
-            
-        case .none:
-            break
+
+        // 毛玻璃底：模糊跟随下方内容，深色材质保证白字始终可读。
+        let blurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemThickMaterialDark))
+        blurView.translatesAutoresizingMaskIntoConstraints = false
+        blurView.layer.cornerRadius = cornerRadius
+        blurView.layer.cornerCurve = .continuous
+        blurView.clipsToBounds = true
+        container.addSubview(blurView)
+
+        // 叠一层半透明黑，避免浅色页面上看起来发灰；同时承担 1pt 描边。
+        let tintView = UIView()
+        tintView.translatesAutoresizingMaskIntoConstraints = false
+        tintView.backgroundColor = UIColor.black.withAlphaComponent(0.22)
+        tintView.layer.cornerRadius = cornerRadius
+        tintView.layer.cornerCurve = .continuous
+        tintView.layer.borderWidth = 1
+        tintView.layer.borderColor = UIColor.white.withAlphaComponent(0.12).cgColor
+        container.addSubview(tintView)
+
+        let contentStack = UIStackView()
+        contentStack.axis = .horizontal
+        contentStack.alignment = .center
+        contentStack.spacing = contentSpacing
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(contentStack)
+
+        if let badge = makeBadge(for: type) {
+            contentStack.addArrangedSubview(badge)
         }
-        
-        // Add title label
+
         let titleLabel = UILabel()
         titleLabel.text = title
-        titleLabel.textColor = .white
-        titleLabel.font = UIFont.systemFont(ofSize: 16, weight: .medium)
-        titleLabel.textAlignment = .center
+        titleLabel.textColor = UIColor.white.withAlphaComponent(0.96)
+        titleLabel.font = .systemFont(ofSize: 14, weight: .medium)
+        titleLabel.textAlignment = type == .none ? .center : .left
         titleLabel.numberOfLines = 0
-        stackView.addArrangedSubview(titleLabel)
-        
-        // Set constraints
+        titleLabel.lineBreakMode = .byWordWrapping
+        contentStack.addArrangedSubview(titleLabel)
+
+        let hasBadge = type != .none
+        let leadingInset: CGFloat = hasBadge ? 15 : 20
+        let trailingInset: CGFloat = hasBadge ? 18 : 20
+        let verticalInset: CGFloat = hasBadge ? 12 : 13
+
+        let availableWidth = max(min(maxWidth, overlay.bounds.width - 64), 140)
+        let labelWidth = availableWidth - leadingInset - trailingInset - (hasBadge ? badgeSize + contentSpacing : 0)
+
         NSLayoutConstraint.activate([
-            // Stack view constraints
-            stackView.topAnchor.constraint(equalTo: container.topAnchor, constant: 20),
-            stackView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
-            stackView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20),
-            stackView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -20),
-            
-            // Container constraints - make it a square
-            container.centerXAnchor.constraint(equalTo: rootView.centerXAnchor),
-            container.centerYAnchor.constraint(equalTo: rootView.centerYAnchor),
-            container.widthAnchor.constraint(equalToConstant: 120), // Fixed width for square
-            container.heightAnchor.constraint(equalToConstant: 120) // Fixed height for square
+            blurView.topAnchor.constraint(equalTo: container.topAnchor),
+            blurView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            blurView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            blurView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+
+            tintView.topAnchor.constraint(equalTo: container.topAnchor),
+            tintView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            tintView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            tintView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+
+            contentStack.topAnchor.constraint(equalTo: container.topAnchor, constant: verticalInset),
+            contentStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: leadingInset),
+            contentStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -trailingInset),
+            contentStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -verticalInset),
+
+            titleLabel.widthAnchor.constraint(lessThanOrEqualToConstant: labelWidth),
+
+            // Container: 内容自适应，只限制最大宽度并居中。
+            container.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+            container.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+            container.widthAnchor.constraint(greaterThanOrEqualToConstant: hasBadge ? 108 : 84),
+            container.widthAnchor.constraint(lessThanOrEqualToConstant: availableWidth)
         ])
-        
-        // Animate in
-        UIView.animate(withDuration: 0.3) {
-            rootView.alpha = 1
+
+        // 淡入 + 轻微弹性放大
+        container.alpha = 0
+        container.transform = CGAffineTransform(scaleX: 0.94, y: 0.94)
+        overlay.layoutIfNeeded()
+
+        UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut]) {
+            overlay.alpha = 1
+        }
+        UIView.animate(
+            withDuration: 0.34,
+            delay: 0,
+            usingSpringWithDamping: 0.82,
+            initialSpringVelocity: 0.4,
+            options: [.beginFromCurrentState]
+        ) {
+            container.alpha = 1
+            container.transform = .identity
         }
     }
-    
-    /// Create a success checkmark image
-    private func createSuccessImage() -> UIImage? {
-        let size = CGSize(width: 40, height: 40)
-        UIGraphicsBeginImageContextWithOptions(size, false, 0)
-        
-        guard let context = UIGraphicsGetCurrentContext() else { return nil }
-        
-        // Draw checkmark directly without circle background
-        context.setStrokeColor(UIColor.white.cgColor) // White checkmark
-        context.setLineWidth(3.0)
-        context.setLineCap(.round)
-        context.setLineJoin(.round)
-        
-        // Draw a larger checkmark centered in the image
-        context.move(to: CGPoint(x: 8, y: 20))
-        context.addLine(to: CGPoint(x: 16, y: 28))
-        context.addLine(to: CGPoint(x: 32, y: 12))
-        context.strokePath()
-        
-        let image = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        
-        return image
-    }
-    
-    /// Create an error X image
-    private func createErrorImage() -> UIImage? {
-        let size = CGSize(width: 40, height: 40)
-        UIGraphicsBeginImageContextWithOptions(size, false, 0)
-        
-        guard let context = UIGraphicsGetCurrentContext() else { return nil }
-        
-        // Draw X directly without circle background
-        context.setStrokeColor(UIColor.white.cgColor) // White X
-        context.setLineWidth(3.0)
-        context.setLineCap(.round)
-        context.setLineJoin(.round)
-        
-        // Draw a larger X centered in the image
-        context.move(to: CGPoint(x: 10, y: 10))
-        context.addLine(to: CGPoint(x: 30, y: 30))
-        context.strokePath()
-        
-        context.move(to: CGPoint(x: 30, y: 10))
-        context.addLine(to: CGPoint(x: 10, y: 30))
-        context.strokePath()
-        
-        let image = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        
-        return image
+
+    /// 图标徽标：成功/失败用语义色圆底 + 白色符号，加载用系统指示器。
+    private func makeBadge(for type: ToastType) -> UIView? {
+        switch type {
+        case .none:
+            return nil
+
+        case .loading:
+            let spinner = UIActivityIndicatorView(style: .medium)
+            spinner.color = .white
+            spinner.startAnimating()
+            spinner.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                spinner.widthAnchor.constraint(equalToConstant: badgeSize),
+                spinner.heightAnchor.constraint(equalToConstant: badgeSize)
+            ])
+            return spinner
+
+        case .success, .error:
+            let tint: UIColor = type == .success ? .systemGreen : .systemRed
+            let symbolName = type == .success ? "checkmark" : "exclamationmark"
+
+            let badge = UIView()
+            badge.translatesAutoresizingMaskIntoConstraints = false
+            badge.backgroundColor = tint.withAlphaComponent(0.2)
+            badge.layer.cornerRadius = badgeSize / 2
+            badge.layer.cornerCurve = .continuous
+
+            let configuration = UIImage.SymbolConfiguration(pointSize: 11, weight: .bold)
+            let imageView = UIImageView(image: UIImage(systemName: symbolName, withConfiguration: configuration))
+            imageView.tintColor = tint
+            imageView.contentMode = .scaleAspectFit
+            imageView.translatesAutoresizingMaskIntoConstraints = false
+            badge.addSubview(imageView)
+
+            NSLayoutConstraint.activate([
+                badge.widthAnchor.constraint(equalToConstant: badgeSize),
+                badge.heightAnchor.constraint(equalToConstant: badgeSize),
+                imageView.centerXAnchor.constraint(equalTo: badge.centerXAnchor),
+                imageView.centerYAnchor.constraint(equalTo: badge.centerYAnchor)
+            ])
+            return badge
+        }
     }
 }
