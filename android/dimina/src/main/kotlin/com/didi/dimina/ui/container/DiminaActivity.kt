@@ -157,6 +157,10 @@ class DiminaActivity : ComponentActivity() {
     private val isLoading = mutableStateOf(true)
     private var suspendedForMiniProgramNavigation = false
 
+    // 系统深浅模式缓存（onCreate 时读一次；用户切换系统深色/浅色不会在 Activity 生命周期内
+    // 触发 DiminaActivity 重建，按宿主 app 重启时刷新即可）
+    private lateinit var isDarkSystem: Boolean
+
     // UI state for navigation bar
     private val showNavigationBar = mutableStateOf(true)
     private val navigationBarTitle = mutableStateOf("")
@@ -521,6 +525,10 @@ class DiminaActivity : ComponentActivity() {
         }
         enableEdgeToEdge()
 
+        // 缓存系统深浅模式；setInitialStyle 和 Capsule 渲染时据此做默认值兜底
+        isDarkSystem = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+
         // 获取屏幕高度
         screenHeight = resources.displayMetrics.heightPixels
 
@@ -805,11 +813,27 @@ class DiminaActivity : ComponentActivity() {
         // Set page background color
         backgroundColor.value = config.backgroundColor
 
-        updateSystemNavigationBarColor(config.backgroundColor)
-        updateWebViewBackgroundColor(config.backgroundColor)
+        // 深色兜底：当系统深色且小程序用了浅色默认值（nav bar / page bg），
+        // 自动换成深底并强制白字，避免胶囊 + 状态栏区域像白雾。
+        // 小程序显式配了深底 + 白字（深色导航栏）的情况不会被此分支覆盖。
+        if (isDarkSystem) {
+            val navBg = parseCssColor(navigationBarBackgroundColor.value)
+            if (isLightColor(navBg)) {
+                navigationBarBackgroundColor.value = "#181C26"
+            }
+            val pageBg = parseCssColor(backgroundColor.value)
+            if (isLightColor(pageBg)) {
+                backgroundColor.value = "#0E1118"
+            }
+        }
 
-        // Update status bar style based on text style
-        this.updateActionColorStyle(config.navigationBarTextStyle)
+        updateSystemNavigationBarColor(backgroundColor.value)
+        updateWebViewBackgroundColor(backgroundColor.value)
+
+        // nav bar text color: 若深底，则强制白字；否则按 page.json 配置
+        val finalNavBg = parseCssColor(navigationBarBackgroundColor.value)
+        val finalTextStyle = if (isLightColor(finalNavBg)) config.navigationBarTextStyle else "white"
+        this.updateActionColorStyle(finalTextStyle)
     }
 
     private fun parseCssColor(value: String, fallback: Color = Color.White): Color {
@@ -1945,6 +1969,14 @@ class DiminaActivity : ComponentActivity() {
 
             if (!isLoading.value && com.didi.dimina.Dimina.getInstance().shouldShowCapsule()) {
                 val configuration = LocalConfiguration.current
+                // Capsule 背景：深色下用深底（半透明保持悬浮感），浅色下沿用默认 WHITE。
+                // 框架层只按系统 uiMode 判断；宿主若有手动 themeMode，应在启动时
+                // 通过 Intent extra 覆盖（见 openMiniProgram companion）。
+                val isDarkLocal =
+                    (configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                        android.content.res.Configuration.UI_MODE_NIGHT_YES
+                val capsuleBg = if (isDarkLocal) Color(0xCC181C26) else Color(Dimina.getInstance().getCapsuleBackgroundColor())
+                val capsuleFg = if (isDarkLocal) Color(0xFFF1F3F9) else Color(Dimina.getInstance().getCapsuleIconColor())
                 val (windowInfo, menuRect) = remember(
                     configuration.screenWidthDp,
                     configuration.screenHeightDp,
@@ -1958,8 +1990,8 @@ class DiminaActivity : ComponentActivity() {
                     )
                 }
                 MiniProgramCapsuleButton(
-                    backgroundColor = Color(Dimina.getInstance().getCapsuleBackgroundColor()),
-                    iconColor = Color(Dimina.getInstance().getCapsuleIconColor()),
+                    backgroundColor = capsuleBg,
+                    iconColor = capsuleFg,
                     onMoreClick = {
                         showMiniProgramMenu.value = true
                     },
