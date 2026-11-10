@@ -535,7 +535,15 @@ struct ContentView: View {
                 )
             }
         )
-        .scaleEffect(draggingId == item.appId ? 1.04 : 1)
+        .scaleEffect(draggingId == item.appId ? 1.06 : 1)
+        .shadow(
+            color: .black.opacity(draggingId == item.appId ? 0.16 : 0),
+            radius: draggingId == item.appId ? 16 : 0,
+            x: 0,
+            y: draggingId == item.appId ? 10 : 0
+        )
+        // 拿起/放下时有个带点回弹的过渡，不会「啪」一下变大小。
+        .animation(.spring(response: 0.3, dampingFraction: 0.68), value: draggingId == item.appId)
         .zIndex(draggingId == item.appId ? 1 : 0)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -621,7 +629,15 @@ struct ContentView: View {
                 )
             }
         )
-        .scaleEffect(draggingId == item.appId ? 1.04 : 1)
+        .scaleEffect(draggingId == item.appId ? 1.06 : 1)
+        .shadow(
+            color: .black.opacity(draggingId == item.appId ? 0.16 : 0),
+            radius: draggingId == item.appId ? 16 : 0,
+            x: 0,
+            y: draggingId == item.appId ? 10 : 0
+        )
+        // 拿起/放下时有个带点回弹的过渡，不会「啪」一下变大小。
+        .animation(.spring(response: 0.3, dampingFraction: 0.68), value: draggingId == item.appId)
         .zIndex(draggingId == item.appId ? 1 : 0)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -684,10 +700,12 @@ struct ContentView: View {
               from != to
         else { return }
 
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) {
             let moved = manualOrder.remove(at: from)
             manualOrder.insert(moved, at: to)
         }
+        // 换位时给一点触感，拖动不至于「无声无息」。
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
         UserDefaults.standard.set(manualOrder, forKey: Self.appOrderKey)
     }
 

@@ -12,6 +12,9 @@ import android.graphics.Bitmap
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.HapticFeedbackConstants
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -115,6 +118,14 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import kotlin.math.roundToInt
 import androidx.compose.ui.zIndex
 import androidx.core.view.WindowInsetsControllerCompat
 import com.didi.dimina.Dimina
@@ -244,7 +255,14 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
     var draggingId by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableStateOf(Offset.Zero) }
     var suppressTapUntil by remember { mutableStateOf(0L) }
+    // 拖拽中跟随手指的浮动卡片：起点（网格视口坐标）与尺寸。
+    var dragPreviewOrigin by remember { mutableStateOf(Offset.Zero) }
+    var dragPreviewSize by remember { mutableStateOf(IntSize.Zero) }
+    // 网格视口 / 外层容器在窗口中的位置，用于把浮动卡片摆到手指下。
+    var gridWindowPos by remember { mutableStateOf(Offset.Zero) }
+    var boxWindowPos by remember { mutableStateOf(Offset.Zero) }
     val gridState = rememberLazyGridState()
+    val hostView = LocalView.current
 
     fun refresh() {
         apps = HostAppRepository.load(context)
@@ -378,6 +396,8 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
         val updated = base.toMutableList().apply { add(to, removeAt(from)) }
         appOrder = updated
         HostAppOrder.save(context, updated)
+        // 换位时给一点触感反馈，拖动不至于「无声无息」。
+        hostView.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
     }
 
     val permissionStates = remember(permissionTick, showSettings) {
@@ -469,7 +489,8 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(HostBg),
+                .background(HostBg)
+                .onGloballyPositioned { boxWindowPos = it.positionInWindow() },
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 HostHeader(
@@ -514,7 +535,8 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                         // 搜索框弹出键盘后，点列表空白处收起键盘，避免键盘一直压在首页上。
                         .pointerInput(Unit) {
                             detectTapGestures(onTap = { focusManager.clearFocus() })
-                        },
+                        }
+                        .onGloballyPositioned { gridWindowPos = it.positionInWindow() },
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 28.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(if (catalog.config.listLayout) 10.dp else 12.dp),
@@ -565,14 +587,15 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                             val isDragging = draggingId == item.appId
                             Box(
                                 modifier = Modifier
-                                    .zIndex(if (isDragging) 1f else 0f)
-                                    .graphicsLayer {
-                                        if (isDragging) {
-                                            translationX = dragOffset.x
-                                            translationY = dragOffset.y
-                                            alpha = 0.94f
-                                        }
-                                    }
+                                    // 其余卡片换位时用弹簧过渡，避免生硬地瞬间跳位。
+                                    .animateItem(
+                                        placementSpec = spring(
+                                            dampingRatio = 0.78f,
+                                            stiffness = Spring.StiffnessMediumLow,
+                                        ),
+                                    )
+                                    // 被拖起来的这张只在原位留个淡影，跟手的是上面的浮动预览。
+                                    .graphicsLayer { alpha = if (isDragging) 0.28f else 1f }
                                     .pointerInput(item.appId) {
                                         var travelled = 0f
                                         detectDragGesturesAfterLongPress(
@@ -581,6 +604,15 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                                                 draggingId = item.appId
                                                 dragOffset = Offset.Zero
                                                 travelled = 0f
+                                                val info = gridState.layoutInfo.visibleItemsInfo
+                                                    .firstOrNull { it.key == item.appId }
+                                                if (info != null) {
+                                                    dragPreviewOrigin = Offset(
+                                                        info.offset.x.toFloat(),
+                                                        info.offset.y.toFloat(),
+                                                    )
+                                                    dragPreviewSize = info.size
+                                                }
                                                 // 长按已经算「排序 / 详情」，压掉随后可能补发的点击
                                                 suppressTapUntil = System.currentTimeMillis() + 5_000
                                             },
@@ -589,32 +621,26 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                                                 dragOffset += amount
                                                 travelled += amount.getDistance()
 
-                                                val info = gridState.layoutInfo.visibleItemsInfo
-                                                    .firstOrNull { it.key == item.appId }
-                                                val target = if (info == null) {
-                                                    null
-                                                } else {
+                                                // 用「抓起来时的位置 + 手指位移」判断命中，
+                                                // 与换位后的布局无关，所以不会连环换位。
+                                                val w = dragPreviewSize.width
+                                                val h = dragPreviewSize.height
+                                                if (w > 0 && h > 0) {
                                                     val center = Offset(
-                                                        info.offset.x + info.size.width / 2f + dragOffset.x,
-                                                        info.offset.y + info.size.height / 2f + dragOffset.y,
+                                                        dragPreviewOrigin.x + dragOffset.x + w / 2f,
+                                                        dragPreviewOrigin.y + dragOffset.y + h / 2f,
                                                     )
-                                                    gridState.layoutInfo.visibleItemsInfo.firstOrNull { other ->
-                                                        other.key is String &&
-                                                            other.key != item.appId &&
-                                                            center.x >= other.offset.x &&
-                                                            center.x <= other.offset.x + other.size.width &&
-                                                            center.y >= other.offset.y &&
-                                                            center.y <= other.offset.y + other.size.height
-                                                    }?.also {
-                                                        // 换位后删掉位移差，卡片保持贴手
-                                                        dragOffset -= Offset(
-                                                            (it.offset.x - info.offset.x).toFloat(),
-                                                            (it.offset.y - info.offset.y).toFloat(),
-                                                        )
-                                                    }
+                                                    val targetId = gridState.layoutInfo.visibleItemsInfo
+                                                        .firstOrNull { other ->
+                                                            other.key is String &&
+                                                                other.key != item.appId &&
+                                                                center.x >= other.offset.x &&
+                                                                center.x <= other.offset.x + other.size.width &&
+                                                                center.y >= other.offset.y &&
+                                                                center.y <= other.offset.y + other.size.height
+                                                        }?.key as? String
+                                                    if (targetId != null) moveApp(item.appId, targetId)
                                                 }
-                                                val targetId = target?.key as? String
-                                                if (targetId != null) moveApp(item.appId, targetId)
                                             },
                                             onDragEnd = {
                                                 // 长按后没挪动就是「查看详情」，拖动过则已排序
@@ -654,6 +680,42 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
 
             if (importing) {
                 ImportingOverlay()
+            }
+
+            // 长按拖动时跟手的浮动卡片：位置只由手指位移决定，
+            // 网格里的换位由弹簧动画补齐，两者互不干扰。
+            val previewItem = visible.firstOrNull { it.appId == draggingId }
+            if (previewItem != null && dragPreviewSize.width > 0 && dragPreviewSize.height > 0) {
+                val density = LocalDensity.current
+                val previewWidth = with(density) { dragPreviewSize.width.toDp() }
+                val previewHeight = with(density) { dragPreviewSize.height.toDp() }
+                val topLeft = gridWindowPos - boxWindowPos + dragPreviewOrigin + dragOffset
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(topLeft.x.roundToInt(), topLeft.y.roundToInt()) }
+                        .size(previewWidth, previewHeight)
+                        .graphicsLayer {
+                            scaleX = 1.05f
+                            scaleY = 1.05f
+                        }
+                        .shadow(16.dp, RoundedCornerShape(22.dp)),
+                ) {
+                    if (catalog.config.listLayout) {
+                        AppListRow(
+                            item = previewItem,
+                            bitmap = catalog.icons[previewItem.appId],
+                            transfer = catalog.transfers[previewItem.appId],
+                            onOpen = {},
+                        )
+                    } else {
+                        AppGridCard(
+                            item = previewItem,
+                            bitmap = catalog.icons[previewItem.appId],
+                            transfer = catalog.transfers[previewItem.appId],
+                            onOpen = {},
+                        )
+                    }
+                }
             }
         }
     }
