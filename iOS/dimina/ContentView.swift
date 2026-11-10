@@ -38,6 +38,8 @@ struct ContentView: View {
     /// 拖动起点与当前手指位置（内容坐标系），用于让浮动卡片跟手。
     @State private var dragStart: CGPoint?
     @State private var dragLocation: CGPoint?
+    /// 按下瞬间各格子的矩形（顺序与展示列表一致），拖动全程不变。
+    @State private var dragSlots: [CGRect] = []
 
     /// 存储UINavigationController的引用
     static var navigationController: UINavigationController?
@@ -546,8 +548,8 @@ struct ContentView: View {
                     )
                 }
             )
-            // 被拖起来的那张只在原位留个淡影，跟手的是最上层的浮层。
-            .opacity(draggingId == item.appId ? 0.28 : 1)
+            // 被拖起来的那张先藏起来，跟手的是最上层的浮层，原位不留残影。
+            .opacity(draggingId == item.appId ? 0 : 1)
             .zIndex(draggingId == item.appId ? 1 : 0)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -561,6 +563,7 @@ struct ContentView: View {
                     guard case let .second(true, drag?) = value else { return }
                     if draggingId == nil {
                         dragFrames = cardFrames
+                        dragSlots = visibleItems.compactMap { cardFrames[$0.appId] }
                         draggingId = item.appId
                         dragStart = drag.location
                         dragLocation = drag.location
@@ -569,10 +572,14 @@ struct ContentView: View {
                     }
                     guard draggingId == item.appId else { return }
                     dragLocation = drag.location
-                    if let target = dragFrames.first(where: {
-                        $0.key != item.appId && $0.value.contains(drag.location)
-                    })?.key {
-                        moveCard(item.appId, over: target)
+                    // 用按下瞬间的格子矩形判断落在哪一格，再用「当前」第几格取目标，
+                    // 布局动画途中也不会两张卡片来回抢位。
+                    if let slot = dragSlots.firstIndex(where: { $0.contains(drag.location) }),
+                       slot < visibleItems.count {
+                        let target = visibleItems[slot].appId
+                        if target != item.appId {
+                            moveCard(item.appId, over: target)
+                        }
                     }
                 }
                 .onEnded { value in
@@ -642,8 +649,8 @@ struct ContentView: View {
                     )
                 }
             )
-            // 被拖起来的那张只在原位留个淡影，跟手的是最上层的浮层。
-            .opacity(draggingId == item.appId ? 0.28 : 1)
+            // 被拖起来的那张先藏起来，跟手的是最上层的浮层，原位不留残影。
+            .opacity(draggingId == item.appId ? 0 : 1)
             .zIndex(draggingId == item.appId ? 1 : 0)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -657,6 +664,7 @@ struct ContentView: View {
                     guard case let .second(true, drag?) = value else { return }
                     if draggingId == nil {
                         dragFrames = cardFrames
+                        dragSlots = visibleItems.compactMap { cardFrames[$0.appId] }
                         draggingId = item.appId
                         dragStart = drag.location
                         dragLocation = drag.location
@@ -665,10 +673,14 @@ struct ContentView: View {
                     }
                     guard draggingId == item.appId else { return }
                     dragLocation = drag.location
-                    if let target = dragFrames.first(where: {
-                        $0.key != item.appId && $0.value.contains(drag.location)
-                    })?.key {
-                        moveCard(item.appId, over: target)
+                    // 用按下瞬间的格子矩形判断落在哪一格，再用「当前」第几格取目标，
+                    // 布局动画途中也不会两张卡片来回抢位。
+                    if let slot = dragSlots.firstIndex(where: { $0.contains(drag.location) }),
+                       slot < visibleItems.count {
+                        let target = visibleItems[slot].appId
+                        if target != item.appId {
+                            moveCard(item.appId, over: target)
+                        }
                     }
                 }
                 .onEnded { value in

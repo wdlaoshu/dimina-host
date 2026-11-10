@@ -94,6 +94,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
@@ -101,6 +102,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -259,6 +261,8 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
     // 拖拽中跟随手指的浮动卡片：起点（网格视口坐标）与尺寸。
     var dragPreviewOrigin by remember { mutableStateOf(Offset.Zero) }
     var dragPreviewSize by remember { mutableStateOf(IntSize.Zero) }
+    // 按下瞬间的每个格子矩形（顺序与当前展示列表一致），拖动全程不再变化。
+    var dragSlots by remember { mutableStateOf<List<Rect>>(emptyList()) }
     // 网格视口 / 外层容器在窗口中的位置，用于把浮动卡片摆到手指下。
     var gridWindowPos by remember { mutableStateOf(Offset.Zero) }
     var boxWindowPos by remember { mutableStateOf(Offset.Zero) }
@@ -380,6 +384,8 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
             }
         }
     }
+    // 拖拽回调在 pointerInput 里，必须拿最新的展示列表，否则换位后会拿旧顺序判断。
+    val currentVisible by rememberUpdatedState(visible)
 
     /**
      * 长按拖动排序：把 dragging 移到 over 的位置并持久化。
@@ -595,8 +601,8 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                                             stiffness = Spring.StiffnessMediumLow,
                                         ),
                                     )
-                                    // 被拖起来的这张只在原位留个淡影，跟手的是上面的浮动预览。
-                                    .graphicsLayer { alpha = if (isDragging) 0.28f else 1f }
+                                    // 被拖起来的这张先藏起来，跟手的是上面的浮层，原位不留残影。
+                                    .graphicsLayer { alpha = if (isDragging) 0f else 1f }
                                     .pointerInput(item.appId) {
                                         var travelled = 0f
                                         detectDragGesturesAfterLongPress(
@@ -605,14 +611,25 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                                                 draggingId = item.appId
                                                 dragOffset = Offset.Zero
                                                 travelled = 0f
-                                                val info = gridState.layoutInfo.visibleItemsInfo
-                                                    .firstOrNull { it.key == item.appId }
+                                                val cards = gridState.layoutInfo.visibleItemsInfo
+                                                    .filter { it.key is String }
+                                                val info = cards.firstOrNull { it.key == item.appId }
                                                 if (info != null) {
                                                     dragPreviewOrigin = Offset(
                                                         info.offset.x.toFloat(),
                                                         info.offset.y.toFloat(),
                                                     )
                                                     dragPreviewSize = info.size
+                                                }
+                                                // 记录按下时的格子位置：之后布局在动，判断依据不能跟着动，
+                                                // 否则两张卡片会互相抢位、来回抖。
+                                                dragSlots = cards.map {
+                                                    Rect(
+                                                        left = it.offset.x.toFloat(),
+                                                        top = it.offset.y.toFloat(),
+                                                        right = (it.offset.x + it.size.width).toFloat(),
+                                                        bottom = (it.offset.y + it.size.height).toFloat(),
+                                                    )
                                                 }
                                                 // 长按已经算「排序 / 详情」，压掉随后可能补发的点击
                                                 suppressTapUntil = System.currentTimeMillis() + 5_000
@@ -622,8 +639,6 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                                                 dragOffset += amount
                                                 travelled += amount.getDistance()
 
-                                                // 用「抓起来时的位置 + 手指位移」判断命中，
-                                                // 与换位后的布局无关，所以不会连环换位。
                                                 val w = dragPreviewSize.width
                                                 val h = dragPreviewSize.height
                                                 if (w > 0 && h > 0) {
@@ -631,16 +646,11 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                                                         dragPreviewOrigin.x + dragOffset.x + w / 2f,
                                                         dragPreviewOrigin.y + dragOffset.y + h / 2f,
                                                     )
-                                                    val targetId = gridState.layoutInfo.visibleItemsInfo
-                                                        .firstOrNull { other ->
-                                                            other.key is String &&
-                                                                other.key != item.appId &&
-                                                                center.x >= other.offset.x &&
-                                                                center.x <= other.offset.x + other.size.width &&
-                                                                center.y >= other.offset.y &&
-                                                                center.y <= other.offset.y + other.size.height
-                                                        }?.key as? String
-                                                    if (targetId != null) moveApp(item.appId, targetId)
+                                                    val slot = dragSlots.indexOfFirst { it.contains(center) }
+                                                    val targetId = currentVisible.getOrNull(slot)?.appId
+                                                    if (targetId != null && targetId != item.appId) {
+                                                        moveApp(item.appId, targetId)
+                                                    }
                                                 }
                                             },
                                             onDragEnd = {
