@@ -131,10 +131,14 @@ import androidx.compose.ui.unit.IntSize
 import kotlin.math.roundToInt
 import androidx.compose.ui.zIndex
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.didi.dimina.Dimina
+import com.didi.dimina.RunningMiniProgram
 import com.didi.dimina.common.Utils
 import com.didi.dimina.ui.theme.DiminaAndroidTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -253,6 +257,11 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
     var permissionTick by remember { mutableIntStateOf(0) }
     var network by remember { mutableStateOf(context.currentNetworkSnapshot()) }
     var started by remember { mutableStateOf(false) }
+    // 运行中的实例快照 / 切换面板状态。
+    var runningApps by remember { mutableStateOf<List<RunningMiniProgram>>(emptyList()) }
+    var showSwitcher by remember { mutableStateOf(false) }
+    var showCloseAllConfirm by remember { mutableStateOf(false) }
+    var switcherTick by remember { mutableIntStateOf(0) }
     // 长按拖动排序：本地持久化的顺序 + 当前拖拽中的卡片状态。
     var appOrder by remember { mutableStateOf(HostAppOrder.load(context)) }
     var draggingId by remember { mutableStateOf<String?>(null) }
@@ -272,6 +281,12 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
     fun refresh() {
         apps = HostAppRepository.load(context)
         recentIds = RecentApps.load(context).filter { id -> apps.any { it.appId == id } }
+        refreshRunning()
+    }
+
+    fun refreshRunning() {
+        runningApps = runCatching { Dimina.getInstance().runningMiniPrograms() }
+            .getOrDefault(emptyList())
     }
 
     fun showMessage(message: String) {
@@ -280,7 +295,14 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
 
     fun openApp(app: HostApp) {
         recentIds = RecentApps.record(context, app.appId)
+        RecentTimes.record(context, app.appId)
         if (activity != null) {
+            // 已在后台保留的实例直接切回，页面栈原样恢复。
+            if (runningApps.any { it.appId == app.appId } &&
+                Dimina.getInstance().showMiniProgram(app.appId)
+            ) {
+                return
+            }
             Dimina.getInstance().startMiniProgram(
                 activity,
                 app.toMiniProgram(catalog.iconFileFor(app.appId)?.absolutePath),
@@ -344,6 +366,17 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
         onDispose { runCatching { manager.unregisterNetworkCallback(callback) } }
     }
 
+    // 从小程序退回宿主时刷新运行中实例，首页卡片条与切换面板据此更新。
+    val lifecycleOwner = context as? androidx.lifecycle.LifecycleOwner
+    DisposableEffect(lifecycleOwner) {
+        if (lifecycleOwner == null) return@DisposableEffect onDispose {}
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refresh()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -386,6 +419,34 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
     }
     // 拖拽回调在 pointerInput 里，必须拿最新的展示列表，否则换位后会拿旧顺序判断。
     val currentVisible by rememberUpdatedState(visible)
+
+    // 运行中卡片条 / 切换面板的数据：运行中按框架给的顺序，已回收按最近使用。
+    val runningHub = remember(runningApps, hub) {
+        runningApps.mapNotNull { snapshot -> hub.firstOrNull { it.appId == snapshot.appId } }
+    }
+    val recycledHub = remember(recentIds, runningApps, hub) {
+        recentIds
+            .filter { id -> runningApps.none { it.appId == id } }
+            .mapNotNull { id -> hub.firstOrNull { it.appId == id } }
+            .take(6)
+    }
+
+    fun closeAllRunning() {
+        runCatching { Dimina.getInstance().destroyAllMiniPrograms() }
+            .onSuccess {
+                refreshRunning()
+                showMessage("已关闭全部小程序")
+            }
+            .onFailure { showMessage("关闭失败：${it.message ?: "未知错误"}") }
+    }
+
+    // 面板打开期间每分钟刷新一次相对时间。
+    LaunchedEffect(showSwitcher) {
+        while (showSwitcher) {
+            delay(60_000)
+            switcherTick++
+        }
+    }
 
     /**
      * 长按拖动排序：把 dragging 移到 over 的位置并持久化。
@@ -548,6 +609,22 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(if (catalog.config.listLayout) 10.dp else 12.dp),
                 ) {
+                    if (runningHub.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            RunningStrip(
+                                items = runningHub,
+                                icons = catalog.icons,
+                                now = System.currentTimeMillis(),
+                                usedAt = { id -> RecentTimes.usedAt(context, id) },
+                                onOpenAll = {
+                                    refreshRunning()
+                                    showSwitcher = true
+                                },
+                                onOpen = { item -> item.local?.let { openApp(it) } },
+                            )
+                        }
+                    }
+
                     if (updates.isNotEmpty() && filter != HostFilter.Updates) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             UpdateBar(
@@ -803,6 +880,64 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                 onUpdateOne = { installOne(it) },
             )
         }
+    }
+
+    if (showSwitcher) {
+        ModalBottomSheet(
+            onDismissRequest = { showSwitcher = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = HostBg,
+        ) {
+            SwitcherSheet(
+                running = runningHub,
+                recycled = recycledHub,
+                icons = catalog.icons,
+                now = remember(switcherTick, showSwitcher) { System.currentTimeMillis() },
+                usedAt = { id -> RecentTimes.usedAt(context, id) },
+                onOpen = { item ->
+                    showSwitcher = false
+                    val local = item.local
+                    if (local != null) {
+                        scope.launch {
+                            // 等面板收起再启动，避免转场叠在一起。
+                            delay(220)
+                            openApp(local)
+                        }
+                    }
+                },
+                onCloseAll = {
+                    showSwitcher = false
+                    showCloseAllConfirm = true
+                },
+            )
+        }
+    }
+
+    if (showCloseAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showCloseAllConfirm = false },
+            title = { Text("关闭全部小程序？") },
+            text = {
+                Text(
+                    "将结束所有后台实例，页面栈会被清空；小程序包和用户数据保留。",
+                    color = HostMuted,
+                    fontSize = 13.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showCloseAllConfirm = false
+                    closeAllRunning()
+                }) {
+                    Text("全部关闭", color = HostRed, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCloseAllConfirm = false }) {
+                    Text("取消", color = HostMuted)
+                }
+            },
+        )
     }
 
     pendingImport?.let { pkg ->
@@ -1154,6 +1289,279 @@ private fun ErrorBanner(message: String, onRetry: () -> Unit) {
         TextButton(onClick = onRetry) {
             Text("重试", color = HostPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
+    }
+}
+
+// MARK: - Running / switcher
+
+private fun hostRelativeTimeText(timestamp: Long, now: Long): String {
+    if (timestamp <= 0L) return "刚刚"
+    val seconds = ((now - timestamp) / 1000).coerceAtLeast(0)
+    if (seconds < 60) return "刚刚"
+    val minutes = seconds / 60
+    if (minutes < 60) return "$minutes 分钟前"
+    val hours = minutes / 60
+    if (hours < 24) return "$hours 小时前"
+    return "${hours / 24} 天前"
+}
+
+/** 首页顶部的「运行中」横条：只在有后台实例时出现，点卡片直接切回。 */
+@Composable
+private fun RunningStrip(
+    items: List<HostHubItem>,
+    icons: Map<String, Bitmap>,
+    now: Long,
+    usedAt: (String) -> Long,
+    onOpenAll: () -> Unit,
+    onOpen: (HostHubItem) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(HostSurface)
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(HostGreen)
+            )
+            Spacer(Modifier.width(7.dp))
+            Text(
+                text = "运行中 ${items.size}",
+                color = HostText,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = "全部 ›",
+                color = HostMuted,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable(onClick = onOpenAll)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(vertical = 1.dp),
+        ) {
+            rowItems(items, key = { it.appId }) { item ->
+                RunningCard(
+                    item = item,
+                    bitmap = icons[item.appId],
+                    timeText = hostRelativeTimeText(usedAt(item.appId), now),
+                    onClick = { onOpen(item) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RunningCard(
+    item: HostHubItem,
+    bitmap: Bitmap?,
+    timeText: String,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .width(132.dp)
+            .height(96.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(HostBg.copy(alpha = 0.65f))
+            .clickable(onClick = onClick)
+            .padding(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            AppIcon(name = item.name, bitmap = bitmap, size = 34, corner = 11, fontSize = 15)
+            Spacer(Modifier.weight(1f))
+            Box(
+                Modifier
+                    .padding(top = 3.dp)
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(HostGreen)
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = item.name,
+            color = HostText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = timeText,
+            color = HostMuted,
+            fontSize = 10.sp,
+            maxLines = 1,
+        )
+    }
+}
+
+/** 切换面板：运行中的实例点击切回，已回收的按需重启。 */
+@Composable
+private fun SwitcherSheet(
+    running: List<HostHubItem>,
+    recycled: List<HostHubItem>,
+    icons: Map<String, Bitmap>,
+    now: Long,
+    usedAt: (String) -> Long,
+    onOpen: (HostHubItem) -> Unit,
+    onCloseAll: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .padding(top = 8.dp, bottom = 28.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(7.dp)
+                    .clip(CircleShape)
+                    .background(HostGreen)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "运行中 ${running.size}",
+                color = HostText,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Spacer(Modifier.height(18.dp))
+
+        if (running.isEmpty()) {
+            Text("当前没有运行中的小程序", color = HostMuted, fontSize = 13.sp)
+        } else {
+            SwitcherGrid(running, icons, now, usedAt, isRunning = true, onOpen = onOpen)
+        }
+
+        if (recycled.isNotEmpty()) {
+            Spacer(Modifier.height(18.dp))
+            Text(
+                text = "最近使用",
+                color = HostMuted,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(10.dp))
+            SwitcherGrid(recycled, icons, now, usedAt, isRunning = false, onOpen = onOpen)
+        }
+
+        if (running.isNotEmpty()) {
+            Spacer(Modifier.height(18.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(HostRed.copy(alpha = 0.1f))
+                    .clickable(onClick = onCloseAll),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "全部关闭",
+                    color = HostRed,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SwitcherGrid(
+    items: List<HostHubItem>,
+    icons: Map<String, Bitmap>,
+    now: Long,
+    usedAt: (String) -> Long,
+    isRunning: Boolean,
+    onOpen: (HostHubItem) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        items.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                row.forEach { item ->
+                    SwitcherCard(
+                        item = item,
+                        bitmap = icons[item.appId],
+                        timeText = if (isRunning) {
+                            hostRelativeTimeText(usedAt(item.appId), now)
+                        } else {
+                            "按需重启"
+                        },
+                        isRunning = isRunning,
+                        onClick = { onOpen(item) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SwitcherCard(
+    item: HostHubItem,
+    bitmap: Bitmap?,
+    timeText: String,
+    isRunning: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .heightIn(min = 116.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(HostSurface)
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            AppIcon(name = item.name, bitmap = bitmap, size = 42, corner = 13, fontSize = 17)
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = if (isRunning) "运行中" else "已回收",
+                color = if (isRunning) HostGreen else HostMuted,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(if (isRunning) HostGreen.copy(alpha = 0.12f) else HostBg)
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = item.name,
+            color = HostText,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = timeText,
+            color = HostMuted,
+            fontSize = 10.sp,
+            maxLines = 1,
+        )
     }
 }
 

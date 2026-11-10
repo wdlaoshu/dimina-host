@@ -240,6 +240,23 @@ object RecentApps {
     }
 }
 
+/** 记录每个小程序最近一次使用时间，切换器用它显示「刚刚 / N 分钟前」。 */
+object RecentTimes {
+    private const val PREFS = "dimina_host_shell"
+    private const val PREFIX = "recent_time_"
+
+    fun record(context: Context, appId: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(PREFIX + appId, System.currentTimeMillis())
+            .apply()
+    }
+
+    fun usedAt(context: Context, appId: String): Long =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getLong(PREFIX + appId, 0L)
+}
+
 /** 记录安装来源：本地 ZIP 导入 / 远程目录下载，首页角标据此区分。 */
 object HostInstallOrigin {
     private const val PREFS = "dimina_host_shell"

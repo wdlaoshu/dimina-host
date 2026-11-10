@@ -129,8 +129,11 @@ struct HostImportPackage: Identifiable {
 final class HostStore: ObservableObject {
     @Published private(set) var apps: [HostApp] = []
     @Published private(set) var recentIds: [String] = []
+    /// 每个小程序最近一次使用时间，切换器与「最近使用」用它显示「刚刚 / N 分钟前」。
+    @Published private(set) var recentTimes: [String: TimeInterval] = [:]
 
     private let recentKey = "dimina.host.recentAppIds"
+    private let recentTimeKey = "dimina.host.recentTimes"
     private let maxRecent = 8
 
     init() {
@@ -172,6 +175,9 @@ final class HostStore: ObservableObject {
         let validIds = Set(apps.map(\.appId))
         let stored = UserDefaults.standard.stringArray(forKey: recentKey) ?? []
         recentIds = stored.filter { validIds.contains($0) }
+
+        let storedTimes = UserDefaults.standard.dictionary(forKey: recentTimeKey) as? [String: TimeInterval] ?? [:]
+        recentTimes = storedTimes.filter { validIds.contains($0.key) }
     }
 
     func recordRecent(_ appId: String) {
@@ -179,6 +185,19 @@ final class HostStore: ObservableObject {
         updated.insert(appId, at: 0)
         recentIds = Array(updated.prefix(maxRecent))
         UserDefaults.standard.set(recentIds, forKey: recentKey)
+        recordUsed(appId)
+    }
+
+    /// 切回后台实例时也要刷新使用时间，切换器的相对时间才准。
+    func recordUsed(_ appId: String) {
+        var times = recentTimes
+        times[appId] = Date().timeIntervalSince1970
+        recentTimes = times
+        UserDefaults.standard.set(times, forKey: recentTimeKey)
+    }
+
+    func lastUsed(_ appId: String) -> Date? {
+        recentTimes[appId].map { Date(timeIntervalSince1970: $0) }
     }
 
     func install(_ package: HostImportPackage) async throws {

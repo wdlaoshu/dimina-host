@@ -40,6 +40,10 @@ struct ContentView: View {
     @State private var dragLocation: CGPoint?
     /// 按下瞬间各格子的矩形（顺序与展示列表一致），拖动全程不变。
     @State private var dragSlots: [CGRect] = []
+    /// 当前仍在运行的小程序（前台排第一），由框架的实例快照刷新。
+    @State private var runningIds: [String] = []
+    @State private var showSwitcher = false
+    @State private var showCloseAllConfirm = false
 
     /// 存储UINavigationController的引用
     static var navigationController: UINavigationController?
@@ -84,8 +88,30 @@ struct ContentView: View {
         .task {
             manualOrder = UserDefaults.standard.stringArray(forKey: Self.appOrderKey) ?? []
             permissions.refresh()
+            refreshRunning()
             autoOpenAppForTestIfRequested()
             await startupCheck()
+        }
+        // 从小程序退回来时根视图重新可见，刷新运行中实例。
+        .background(
+            HostAppearanceObserver {
+                refreshRunning()
+            }
+            .frame(width: 0, height: 0)
+        )
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            refreshRunning()
+        }
+        .sheet(isPresented: $showSwitcher) {
+            switcherSheet
+        }
+        .confirmationDialog("关闭全部小程序？", isPresented: $showCloseAllConfirm, titleVisibility: .visible) {
+            Button("全部关闭", role: .destructive) {
+                Task { await closeAllRunning() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将结束所有后台实例，页面栈会被清空；小程序包和用户数据保留。")
         }
         .sheet(item: $selectedItem) { item in
             HostAppDetailSheet(
@@ -377,6 +403,10 @@ struct ContentView: View {
     private var content: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                if !runningIds.isEmpty {
+                    runningStrip
+                }
+
                 if !updatableItems.isEmpty && filter != .updates {
                     updateBar
                 }
@@ -461,6 +491,148 @@ struct ContentView: View {
         .padding(.vertical, 12)
         .background(HostTheme.primarySoft)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    // MARK: - Running
+
+    private var runningItems: [HostHubItem] {
+        runningIds.compactMap { id in hubItems.first { $0.appId == id } }
+    }
+
+    /// 最近用过但已被回收的实例，最多列 6 个，点击按普通启动重新打开。
+    private var recycledItems: [HostHubItem] {
+        store.recentIds
+            .filter { !runningIds.contains($0) }
+            .prefix(6)
+            .compactMap { id in hubItems.first { $0.appId == id } }
+    }
+
+    private func refreshRunning() {
+        runningIds = DMPAppManager.sharedInstance().runningMiniPrograms().map(\.appId)
+    }
+
+    private var runningStrip: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(HostTheme.green)
+                    .frame(width: 6, height: 6)
+                Text("运行中 \(runningItems.count)")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(HostTheme.text)
+                Spacer(minLength: 4)
+                Button {
+                    refreshRunning()
+                    showSwitcher = true
+                } label: {
+                    HStack(spacing: 2) {
+                        Text("全部")
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(HostTheme.muted)
+                }
+                .buttonStyle(.plain)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(runningItems) { item in
+                        Button {
+                            activateRunning(item)
+                        } label: {
+                            runningCard(item)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 1)
+            }
+        }
+        .padding(12)
+        .background(HostTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(HostTheme.line, lineWidth: 1)
+        )
+    }
+
+    private func runningCard(_ item: HostHubItem) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
+                appIcon(item, size: 34, corner: 11, fontSize: 15)
+                Spacer(minLength: 2)
+                Circle()
+                    .fill(HostTheme.green)
+                    .frame(width: 6, height: 6)
+                    .padding(.top, 3)
+            }
+            Text(item.name)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(HostTheme.text)
+                .lineLimit(1)
+            Text(hostRelativeTimeText(store.lastUsed(item.appId)))
+                .font(.system(size: 10))
+                .foregroundColor(HostTheme.muted)
+                .lineLimit(1)
+        }
+        .padding(10)
+        .frame(width: 132, height: 96, alignment: .topLeading)
+        .background(HostTheme.bg.opacity(0.65))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var switcherSheet: some View {
+        HostSwitcherSheet(
+            running: runningItems,
+            recycled: recycledItems,
+            icons: catalog.icons,
+            times: store.recentTimes,
+            onOpen: { item in
+                showSwitcher = false
+                // 等面板收起再做导航，避免转场叠在一起。
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    if runningIds.contains(item.appId) {
+                        activateRunning(item)
+                    } else {
+                        open(item)
+                    }
+                }
+            },
+            onCloseAll: {
+                showSwitcher = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    showCloseAllConfirm = true
+                }
+            }
+        )
+    }
+
+    /// 切回已保留的实例，页面栈原样恢复；实例已被回收时退回普通启动。
+    private func activateRunning(_ item: HostHubItem) {
+        guard let app = item.local else { return }
+        store.recordUsed(app.appId)
+        Task { @MainActor in
+            do {
+                try await DMPAppManager.sharedInstance().switchToMiniProgram(appId: app.appId)
+                refreshRunning()
+            } catch {
+                refreshRunning()
+                open(app)
+            }
+        }
+    }
+
+    private func closeAllRunning() async {
+        do {
+            try await DMPAppManager.sharedInstance().destroyAllMiniPrograms()
+            refreshRunning()
+            showToast("已关闭全部小程序")
+        } catch {
+            showToast("关闭失败：\(error.localizedDescription)", kind: .error)
+        }
     }
 
     private func errorBanner(_ message: String) -> some View {
@@ -1123,11 +1295,32 @@ struct ContentView: View {
     private func open(_ app: HostApp) {
         store.recordRecent(app.appId)
 
+        // 已在后台保留的实例直接切回，页面栈原样恢复；失败再退回普通启动。
+        if runningIds.contains(app.appId) {
+            Task { @MainActor in
+                do {
+                    try await DMPAppManager.sharedInstance().switchToMiniProgram(appId: app.appId)
+                    refreshRunning()
+                } catch {
+                    refreshRunning()
+                    guard let navController = ContentView.navigationController else {
+                        showToast("导航控制器尚未就绪", kind: .error)
+                        return
+                    }
+                    launch(app, navigationController: navController)
+                }
+            }
+            return
+        }
+
         guard let navController = ContentView.navigationController else {
             showToast("导航控制器尚未就绪", kind: .error)
             return
         }
+        launch(app, navigationController: navController)
+    }
 
+    private func launch(_ app: HostApp, navigationController navController: UINavigationController) {
         var appConfig = DMPAppConfig(appName: app.name, appId: app.appId)
         appConfig.isDebugMode = catalog.config.debugEnabled
         appConfig.path = app.path
@@ -2257,6 +2450,226 @@ private struct HostDiagnosticsSheet: View {
             if catalog.diagnostics.isEmpty {
                 await catalog.runDiagnostics()
             }
+        }
+    }
+}
+
+// MARK: - App switcher
+
+private func hostRelativeTimeText(_ date: Date?, now: Date = Date()) -> String {
+    guard let date else { return "刚刚" }
+    let seconds = max(0, now.timeIntervalSince(date))
+    if seconds < 60 { return "刚刚" }
+    let minutes = Int(seconds / 60)
+    if minutes < 60 { return "\(minutes) 分钟前" }
+    let hours = minutes / 60
+    if hours < 24 { return "\(hours) 小时前" }
+    return "\(hours / 24) 天前"
+}
+
+/// 运行中 / 最近使用的切换面板：运行中的实例点击直接切回，已回收的按需重启。
+private struct HostSwitcherSheet: View {
+    let running: [HostHubItem]
+    let recycled: [HostHubItem]
+    let icons: [String: UIImage]
+    let times: [String: TimeInterval]
+    let onOpen: (HostHubItem) -> Void
+    let onCloseAll: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12),
+    ]
+
+    var body: some View {
+        TimelineView(.periodic(from: Date(), by: 60)) { context in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+
+                    if running.isEmpty {
+                        Text("当前没有运行中的小程序")
+                            .font(.system(size: 13))
+                            .foregroundColor(HostTheme.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 8)
+                    } else {
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(running) { item in
+                                Button {
+                                    onOpen(item)
+                                } label: {
+                                    card(
+                                        item,
+                                        time: usedAt(item.appId),
+                                        now: context.date,
+                                        running: true
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    if !recycled.isEmpty {
+                        Text("最近使用")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(HostTheme.muted)
+                            .padding(.top, 2)
+
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(recycled) { item in
+                                Button {
+                                    onOpen(item)
+                                } label: {
+                                    card(
+                                        item,
+                                        time: usedAt(item.appId),
+                                        now: context.date,
+                                        running: false
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    if !running.isEmpty {
+                        Button {
+                            onCloseAll()
+                        } label: {
+                            Text("全部关闭")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(HostTheme.red)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 48)
+                                .background(HostTheme.red.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 4)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 28)
+            }
+        }
+        .background(HostTheme.bg.ignoresSafeArea())
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(HostTheme.green)
+                .frame(width: 7, height: 7)
+            Text("运行中 \(running.count)")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(HostTheme.text)
+            Spacer()
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(HostTheme.muted)
+                    .frame(width: 30, height: 30)
+                    .background(HostTheme.surface)
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func usedAt(_ appId: String) -> Date? {
+        times[appId].map { Date(timeIntervalSince1970: $0) }
+    }
+
+    private func card(_ item: HostHubItem, time: Date?, now: Date, running: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top) {
+                icon(item, size: 42)
+                Spacer(minLength: 4)
+                Text(running ? "运行中" : "已回收")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(running ? HostTheme.green : HostTheme.muted)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(running ? HostTheme.green.opacity(0.12) : HostTheme.bg)
+                    .clipShape(Capsule())
+            }
+            Text(item.name)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(HostTheme.text)
+                .lineLimit(1)
+            Text(running ? hostRelativeTimeText(time, now: now) : "按需重启")
+                .font(.system(size: 10))
+                .foregroundColor(HostTheme.muted)
+                .lineLimit(1)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 116, alignment: .topLeading)
+        .background(HostTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(HostTheme.line, lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func icon(_ item: HostHubItem, size: CGFloat) -> some View {
+        Group {
+            if let image = icons[item.appId] {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    LinearGradient(
+                        colors: [item.tint.opacity(0.7), item.tint],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    Text(item.iconText)
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundColor(.white)
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+    }
+}
+
+/// 根视图重新可见（从小程序返回）时通知宿主刷新运行中实例。
+private struct HostAppearanceObserver: UIViewControllerRepresentable {
+    let onAppear: () -> Void
+
+    func makeUIViewController(context: Context) -> ObserverController {
+        let controller = ObserverController()
+        controller.onAppear = onAppear
+        return controller
+    }
+
+    func updateUIViewController(_ controller: ObserverController, context: Context) {
+        controller.onAppear = onAppear
+    }
+
+    final class ObserverController: UIViewController {
+        var onAppear: (() -> Void)?
+
+        override func loadView() {
+            view = UIView(frame: .zero)
+        }
+
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            onAppear?()
         }
     }
 }
