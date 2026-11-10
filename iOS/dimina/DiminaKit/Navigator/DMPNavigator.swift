@@ -107,6 +107,13 @@ public class DMPNavigator: NSObject {
         }
     }
 
+    /// 胶囊挂在导航控制器视图上，trait 默认跟随宿主。
+    /// 宿主深浅与小程序不一致时（宿主深色 + 小程序浅色），胶囊会变成深底压在浅色导航栏上，
+    /// 由页面显式把胶囊切到小程序自身的深浅。
+    func setCapsuleInterfaceStyle(_ style: UIUserInterfaceStyle) {
+        capsuleView?.overrideUserInterfaceStyle = style
+    }
+
     func setCapsuleEnabled(_ enabled: Bool) {
         capsuleMoreButton?.isEnabled = enabled
         capsuleCloseButton?.isEnabled = enabled

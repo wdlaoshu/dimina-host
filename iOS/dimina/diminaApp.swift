@@ -36,7 +36,7 @@ struct HostRootView: UIViewControllerRepresentable {
         let hostingController = UIHostingController(rootView: ContentView())
         hostingController.view.backgroundColor = UIColor(HostTheme.bg)
 
-        let navigationController = UINavigationController(rootViewController: hostingController)
+        let navigationController = DMPNavigationController(rootViewController: hostingController)
         navigationController.setNavigationBarHidden(true, animated: false)
         navigationController.view.backgroundColor = UIColor(HostTheme.bg)
         navigationController.overrideUserInterfaceStyle = HostThemeMode(rawValue: themeMode)?.uiStyle ?? .unspecified

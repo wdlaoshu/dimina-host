@@ -111,3 +111,23 @@ public class DMPUIManager {
     }
 
 }
+
+/// 宿主根导航控制器。
+/// UIKit 的 UINavigationController 默认不会把状态栏样式下发给子控制器，
+/// 导致小程序页面即使自己是浅色，状态栏仍然沿用宿主（深色）的白色图标。
+/// 这里只在小程序页面位于栈顶时把状态栏交给页面决定，回到宿主首页仍由宿主控制。
+public final class DMPNavigationController: UINavigationController {
+    public override var childForStatusBarStyle: UIViewController? {
+        guard let top = topViewController, isMiniProgramController(top) else { return nil }
+        return top
+    }
+
+    public override var childForStatusBarHidden: UIViewController? {
+        guard let top = topViewController, isMiniProgramController(top) else { return nil }
+        return top
+    }
+
+    private func isMiniProgramController(_ controller: UIViewController) -> Bool {
+        controller is DMPPageController || controller is DMPTabBarContainerController
+    }
+}

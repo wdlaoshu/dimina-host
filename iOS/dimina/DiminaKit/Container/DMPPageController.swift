@@ -513,15 +513,31 @@ public class DMPPageController: UIViewController {
         applyStatusBarStyle(darkStyle: darkStyle)
     }
 
+    /// 当前页面希望的状态栏样式；nil 表示沿用系统/宿主的判断
+    private var statusBarStyleOverride: UIStatusBarStyle?
+
+    public override var preferredStatusBarStyle: UIStatusBarStyle {
+        statusBarStyleOverride ?? super.preferredStatusBarStyle
+    }
+
     /// 状态栏图标颜色跟随小程序自身导航栏深浅，而不是宿主的 window 外观。
     /// 宿主可能是深色、小程序页面是浅色，此时状态栏必须用深色图标，
     /// 否则就是白字压在浅底上（“雾蒙蒙”）。
-    /// 只覆盖当前页面控制器的外观，不改共享 window，返回宿主不受影响。
+    /// 只覆盖当前页面控制器，不改共享 window，返回宿主不受影响。
     private func applyStatusBarStyle(darkStyle: Bool) {
         let style: UIUserInterfaceStyle = darkStyle ? .dark : .light
-        guard overrideUserInterfaceStyle != style else { return }
-        overrideUserInterfaceStyle = style
+        if #available(iOS 13.0, *) {
+            statusBarStyleOverride = darkStyle ? .lightContent : .darkContent
+        } else {
+            statusBarStyleOverride = darkStyle ? .lightContent : .default
+        }
+        if overrideUserInterfaceStyle != style {
+            overrideUserInterfaceStyle = style
+        }
         setNeedsStatusBarAppearanceUpdate()
+        navigationController?.setNeedsStatusBarAppearanceUpdate()
+        // 胶囊挂在导航控制器视图上，跟着小程序自身深浅走，避免深色胶囊压在浅色导航栏上
+        navigator?.setCapsuleInterfaceStyle(style)
     }
 
     private func updateCustomBackButton(darkStyle: Bool) {

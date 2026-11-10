@@ -93,19 +93,35 @@ final class DMPTabBarContainerController: UIViewController {
         applyStatusBarStyleForCurrentTab()
     }
 
+    /// 当前 tab 页希望的状态栏样式；nil 表示沿用系统/宿主的判断
+    private var statusBarStyleOverride: UIStatusBarStyle?
+
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        statusBarStyleOverride ?? super.preferredStatusBarStyle
+    }
+
     /// 状态栏图标颜色跟随当前 tab 页自身的导航栏深浅，而不是宿主的 window 外观。
     /// 容器是导航栈顶时系统只问容器，不会下钻到子页面控制器，所以这里要显式同步。
     private func applyStatusBarStyleForCurrentTab() {
         guard let navStyle = tabPageRecords[selectedIndex]?.navStyle else {
             // 页面还没加载出来时交还给宿主/系统外观，避免误判成浅色
+            statusBarStyleOverride = nil
             overrideUserInterfaceStyle = .unspecified
+            setNeedsStatusBarAppearanceUpdate()
             return
         }
         let isDarkNav = (navStyle["navigationBarTextStyle"] as? String) == "white"
         let style: UIUserInterfaceStyle = isDarkNav ? .dark : .light
-        guard overrideUserInterfaceStyle != style else { return }
-        overrideUserInterfaceStyle = style
+        if #available(iOS 13.0, *) {
+            statusBarStyleOverride = isDarkNav ? .lightContent : .darkContent
+        } else {
+            statusBarStyleOverride = isDarkNav ? .lightContent : .default
+        }
+        if overrideUserInterfaceStyle != style {
+            overrideUserInterfaceStyle = style
+        }
         setNeedsStatusBarAppearanceUpdate()
+        navigationController?.setNeedsStatusBarAppearanceUpdate()
     }
 
     override func viewSafeAreaInsetsDidChange() {
