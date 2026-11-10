@@ -121,14 +121,33 @@ public class DMPNavigator: NSObject {
         let capsuleView = UIView()
         capsuleView.translatesAutoresizingMaskIntoConstraints = false
         capsuleView.accessibilityIdentifier = "dimina.navigation.capsule"
-        let fillColor = DMPAppManager.sharedInstance().capsuleBackgroundColor
-        let iconColor = DMPAppManager.sharedInstance().capsuleIconColor
+
+        // Capsule 颜色：宿主显式设置（非默认 white）→ 用它；否则 → 动态 UIColor 跟随
+        // 宿主 trait 自动深浅切换。Capsule 挂在 navigationController.view 上，trait 自动继承。
+        let configuredFill = DMPAppManager.sharedInstance().capsuleBackgroundColor
+        let configuredIcon = DMPAppManager.sharedInstance().capsuleIconColor
+        let fillColor: UIColor = UIColor { traits in
+            let base = configuredFill.resolvedColor(with: traits)
+            if base == .white {
+                return traits.userInterfaceStyle == .dark
+                    ? UIColor(red: 0.094, green: 0.110, blue: 0.149, alpha: 1)  // 宿主 dark surface
+                    : .white
+            }
+            return base
+        }
+        let iconColor: UIColor = UIColor { traits in
+            // 深宿主下 Capsule 里图标要变浅色，避免看不见
+            traits.userInterfaceStyle == .dark ? .white : configuredIcon.resolvedColor(with: traits)
+        }
+
         capsuleView.backgroundColor = fillColor
         capsuleView.layer.cornerRadius = DMPMenuButtonLayout.capsuleSize.height / 2
         capsuleView.layer.borderWidth = 0.5
-        capsuleView.layer.borderColor = UIColor(
-            red: 229 / 255, green: 229 / 255, blue: 229 / 255, alpha: 1
-        ).cgColor
+        capsuleView.layer.borderColor = UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: 0.2, green: 0.22, blue: 0.28, alpha: 1).cgColor  // 深底上的细分隔
+                : UIColor(red: 229 / 255, green: 229 / 255, blue: 229 / 255, alpha: 1).cgColor
+        }.cgColor
         capsuleView.layer.shadowColor = UIColor.black.cgColor
         // A layer shadow also sits underneath the fill, affecting translucent colors.
         capsuleView.layer.shadowOpacity = fillColor.cgColor.alpha == 1 ? 0.08 : 0
@@ -154,9 +173,11 @@ public class DMPNavigator: NSObject {
 
         let separatorView = UIView()
         separatorView.translatesAutoresizingMaskIntoConstraints = false
-        separatorView.backgroundColor = UIColor(
-            red: 233 / 255, green: 233 / 255, blue: 233 / 255, alpha: 1
-        )
+        separatorView.backgroundColor = UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: 0.2, green: 0.22, blue: 0.28, alpha: 1)
+                : UIColor(red: 233 / 255, green: 233 / 255, blue: 233 / 255, alpha: 1)
+        }
 
         capsuleView.addSubview(moreButton)
         capsuleView.addSubview(separatorView)

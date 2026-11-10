@@ -1157,6 +1157,31 @@ public class DMPPageController: UIViewController {
         }
     }
 
+    /// 解析导航栏颜色：小程序显式指定就用；否则返回动态 UIColor，跟随宿主 trait
+    /// 自动在浅色/深色之间切换。这个逻辑既覆盖 UINavigationBarAppearance 也覆盖
+    /// 自定义导航栏（updateNavigationColor），保证两条渲染链路都吃到深底白字兜底。
+    static func resolveNavigationColors(navStyle: [String: Any]?) -> (backgroundColor: UIColor, textColor: UIColor) {
+        if let bgHex = navStyle?["navigationBarBackgroundColor"] as? String, !bgHex.isEmpty,
+           let fgStr = navStyle?["navigationBarTextStyle"] as? String, !fgStr.isEmpty
+        {
+            // 小程序显式指定了 → 原封不动照用
+            let bg = DMPUtil.colorFromHexString(bgHex) ?? .white
+            let fg: UIColor = (fgStr == "white") ? .white : .black
+            return (bg, fg)
+        }
+
+        // 未完全指定 → 动态色兜底，跟随宿主 trait 自动深浅
+        let dynamicBg = UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: 0.094, green: 0.110, blue: 0.149, alpha: 1)
+                : .white
+        }
+        let dynamicFg = UIColor { traits in
+            traits.userInterfaceStyle == .dark ? .white : .black
+        }
+        return (dynamicBg, dynamicFg)
+    }
+
     // Set navigation bar style
     private func setupNavigationBar() {
         navigationController?.setNavigationBarHidden(true, animated: false)
@@ -1166,10 +1191,9 @@ public class DMPPageController: UIViewController {
         let pageRecord = navigator?.pageRecord(webViewId: webview.getWebViewId())
         let navStyle = pageRecord?.navStyle
             ?? app?.getBundleAppConfig()?.getPageConfig(pagePath: pagePath)
-        let darkStyle = (navStyle?["navigationBarTextStyle"] as? String) == "white"
+        let (backgroundColor, textColor) = DMPPageController.resolveNavigationColors(navStyle: navStyle)
+        let darkStyle = textColor == .white
         var title = appConfig.appName
-        var backgroundColor = UIColor.white
-        var textColor = darkStyle ? UIColor.white : UIColor.black
         var isCustomNavigationStyle = false
 
         if let navStyle = navStyle {
@@ -1181,28 +1205,13 @@ public class DMPPageController: UIViewController {
                 isCustomNavigationStyle = navigationStyle == "custom"
             }
 
-            if let navBackgroundColor = navStyle["navigationBarBackgroundColor"] as? String {
-                backgroundColor = DMPUtil.colorFromHexString(navBackgroundColor) ?? .white
-            }
-
-            if let navTextStyle = navStyle["navigationBarTextStyle"] as? String {
-                textColor = navTextStyle == "white" ? .white : .black
-            }
-
             // Only set default style if navigationItem has not been customized
             // This ensures that styles set via API are not overridden
-            if navigationItem.standardAppearance == nil,
-                let backgroundColor = navStyle["navigationBarBackgroundColor"] as? String,
-                let textStyle = navStyle["navigationBarTextStyle"] as? String
-            {
-
-                let darkStyle = textStyle == "white"
-                let bgColor = DMPUtil.colorFromHexString(backgroundColor) ?? .white
-                let textColor: UIColor = darkStyle ? .white : .black
+            if navigationItem.standardAppearance == nil {
 
                 let appearance = UINavigationBarAppearance()
                 appearance.configureWithOpaqueBackground()
-                appearance.backgroundColor = bgColor
+                appearance.backgroundColor = backgroundColor
                 appearance.titleTextAttributes = [.foregroundColor: textColor]
 
                 // Set navigation bar appearance for the current controller
@@ -1216,8 +1225,6 @@ public class DMPPageController: UIViewController {
 
                 // Set navigation bar button color
                 navigationController?.navigationBar.tintColor = textColor
-
-                DMPUIManager.updateWindowStyle(isDarkTheme: darkStyle)
             }
         }
 
