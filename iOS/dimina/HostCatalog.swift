@@ -353,7 +353,10 @@ final class HostCatalogCenter: ObservableObject {
     private let catalogCacheKey = "dimina.host.catalog.cache"
     private let lastSyncKey = "dimina.host.catalog.lastSync"
     private let etagKey = "dimina.host.catalog.etag"
+    private let iconMetaKey = "dimina.host.catalog.iconMeta"
     private var etag: String?
+    /// appId → 「图标地址 + 版本」；变了就说明该重新拉图标，避免一直用第一次缓存的图
+    private var iconMeta: [String: String] = [:]
     private var iconTasks: Set<String> = []
 
     private let cachesRoot: URL
@@ -377,6 +380,7 @@ final class HostCatalogCenter: ObservableObject {
         }
 
         etag = defaults.string(forKey: etagKey)
+        iconMeta = defaults.dictionary(forKey: iconMetaKey) as? [String: String] ?? [:]
         if let timestamp = defaults.object(forKey: lastSyncKey) as? Date {
             lastSync = timestamp
         }
@@ -513,7 +517,7 @@ final class HostCatalogCenter: ObservableObject {
             syncState = .ok(now)
             catalogError = nil
             loadCachedIcons()
-            downloadMissingIcons()
+            downloadMissingIcons(force: force)
         } catch {
             // 下拉刷新被新一轮刷新/页面切换取消是正常行为，静默忽略，
             // 不要当成同步失败弹 toast（否则用户会看到 "cancelled"）。
@@ -569,6 +573,11 @@ final class HostCatalogCenter: ObservableObject {
         return String(safe) + ".png"
     }
 
+    private func iconKey(for app: HostRemoteApp) -> String {
+        // 换图标文件或发新版本都会让 key 变化，命中变化就重新拉一次
+        "\(iconURL(for: app)?.absoluteString ?? "")|\(app.versionCode)"
+    }
+
     private func loadCachedIcons() {
         for app in remoteApps where icons[app.appId] == nil {
             let file = iconDir.appendingPathComponent(iconCacheName(app.appId))
@@ -578,14 +587,16 @@ final class HostCatalogCenter: ObservableObject {
         }
     }
 
-    private func downloadMissingIcons() {
+    private func downloadMissingIcons(force: Bool = false) {
         for app in remoteApps {
-            guard icons[app.appId] == nil,
-                  !iconTasks.contains(app.appId),
-                  iconURL(for: app) != nil
-            else {
+            guard iconURL(for: app) != nil, !iconTasks.contains(app.appId) else {
                 continue
             }
+            // 有缓存但 key 变了（换图 / 发版）也要刷新，不能只看本地有没有图
+            let needsRefresh =
+                force || icons[app.appId] == nil || iconMeta[app.appId] != iconKey(for: app)
+            guard needsRefresh else { continue }
+
             iconTasks.insert(app.appId)
             Task { [weak self] in
                 await self?.loadIcon(for: app)
@@ -595,19 +606,20 @@ final class HostCatalogCenter: ObservableObject {
 
     private func loadIcon(for app: HostRemoteApp) async {
         defer { iconTasks.remove(app.appId) }
-        let file = iconDir.appendingPathComponent(iconCacheName(app.appId))
-        if let data = try? Data(contentsOf: file), let image = UIImage(data: data) {
-            icons[app.appId] = image
-            return
-        }
         guard let url = iconURL(for: app) else { return }
         do {
-            let request = authorizedRequest(url, timeout: 20)
+            var request = authorizedRequest(url, timeout: 20)
+            // 图标也要绕过本地缓存，否则刷新后还是旧图
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                 return
             }
+            let file = iconDir.appendingPathComponent(iconCacheName(app.appId))
             try? data.write(to: file, options: .atomic)
+            iconMeta[app.appId] = iconKey(for: app)
+            defaults.set(iconMeta, forKey: iconMetaKey)
             if let image = UIImage(data: data) {
                 icons[app.appId] = image
             }
@@ -694,6 +706,8 @@ final class HostCatalogCenter: ObservableObject {
         try? FileManager.default.removeItem(at: iconDir)
         try? FileManager.default.createDirectory(at: iconDir, withIntermediateDirectories: true)
         icons = [:]
+        iconMeta = [:]
+        defaults.set([String: String](), forKey: iconMetaKey)
         loadCachedIcons()
     }
 

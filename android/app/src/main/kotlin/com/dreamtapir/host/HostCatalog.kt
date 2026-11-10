@@ -231,6 +231,29 @@ object HostCatalogStore {
             .putLong("last_sync", millis)
             .apply()
     }
+
+    /** appId → 「图标地址 + 版本」，用来判断缓存的图片是否已经过期。 */
+    fun iconMeta(context: Context): Map<String, String> {
+        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString("icon_meta", null) ?: return emptyMap()
+        return runCatching {
+            val json = JSONObject(raw)
+            buildMap {
+                json.keys().forEach { key ->
+                    val value = json.optString(key)
+                    if (value.isNotEmpty()) put(key, value)
+                }
+            }
+        }.getOrDefault(emptyMap())
+    }
+
+    fun saveIconMeta(context: Context, meta: Map<String, String>) {
+        val json = JSONObject()
+        meta.forEach { (key, value) -> json.put(key, value) }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("icon_meta", json.toString())
+            .apply()
+    }
 }
 
 // MARK: - Controller
@@ -263,6 +286,8 @@ class HostCatalogController(
     private val downloadDir = File(context.cacheDir, "host-downloads").apply { mkdirs() }
     private val iconDir = File(context.cacheDir, "host-icons").apply { mkdirs() }
     private val iconTasks = ConcurrentHashMap.newKeySet<String>()
+    /** appId → 「图标地址 + 版本」；变了就要重新拉，避免一直用第一次缓存的图。 */
+    private var iconMeta: Map<String, String> = HostCatalogStore.iconMeta(context)
 
     init {
         restoreCachedCatalog()
@@ -398,7 +423,7 @@ class HostCatalogController(
                     syncState = HostSyncState.Ok(now)
                     catalogError = null
                     loadCachedIcons()
-                    downloadMissingIcons()
+                    downloadMissingIcons(force)
                 }
             }
         }.onFailure { error ->
@@ -450,19 +475,23 @@ class HostCatalogController(
         }
     }
 
-    private fun downloadMissingIcons() {
+    private fun iconKey(app: HostRemoteApp): String = "${iconUrl(app).orEmpty()}|${app.versionCode}"
+
+    private fun downloadMissingIcons(force: Boolean = false) {
         remoteApps.forEach { app ->
-            if (icons.containsKey(app.appId)) return@forEach
+            val url = iconUrl(app) ?: return@forEach
+            // 有缓存但 key 变了（换图 / 发版）也要刷新，不能只看本地有没有图
+            val needsRefresh = force || !icons.containsKey(app.appId) || iconMeta[app.appId] != iconKey(app)
+            if (!needsRefresh) return@forEach
             if (!iconTasks.add(app.appId)) return@forEach
-            val url = iconUrl(app) ?: run {
-                iconTasks.remove(app.appId)
-                return@forEach
-            }
             scope.launch(Dispatchers.IO) {
                 try {
                     val connection = (URL(url).openConnection() as HttpURLConnection).apply {
                         connectTimeout = 15_000
                         readTimeout = 20_000
+                        // 图标绕过本地缓存，否则刷新后还是旧图
+                        useCaches = false
+                        setRequestProperty("Cache-Control", "no-cache")
                         applyAuth()
                     }
                     try {
@@ -470,6 +499,8 @@ class HostCatalogController(
                         val bytes = connection.inputStream.use { it.readBytes() }
                         val file = iconFile(app.appId)
                         file.writeBytes(bytes)
+                        iconMeta = iconMeta + (app.appId to iconKey(app))
+                        HostCatalogStore.saveIconMeta(context, iconMeta)
                         val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                         if (bitmap != null) {
                             withContext(Dispatchers.Main) { icons = icons + (app.appId to bitmap) }
@@ -600,8 +631,10 @@ class HostCatalogController(
         iconDir.deleteRecursively()
         iconDir.mkdirs()
         icons = emptyMap()
+        iconMeta = emptyMap()
+        HostCatalogStore.saveIconMeta(context, iconMeta)
         loadCachedIcons()
-        downloadMissingIcons()
+        downloadMissingIcons(force = true)
     }
 
     private fun directorySize(dir: File): Long {
