@@ -104,9 +104,10 @@ public class DMPUIManager {
 
     @MainActor
     public static func updateWindowStyle(isDarkTheme: Bool) {
-        if let window = DMPUIManager.getCurrentWindow() {
-            window.overrideUserInterfaceStyle = isDarkTheme ? .dark : .light
-        }
+        // 宿主的 window 外观由宿主自己（HostRootView / diminaApp）管理。
+        // 小程序只通过 DMPPageController 设置自己的导航栏 tintColor / 背景色，
+        // 不应该碰共享 window 的 overrideUserInterfaceStyle，否则返回宿主后
+        // 宿主外观会被最后打开的小程序的 darkStyle 劫持。
     }
 
 }
