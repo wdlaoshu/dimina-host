@@ -35,6 +35,9 @@ struct ContentView: View {
     @State private var cardFrames: [String: CGRect] = [:]
     @State private var dragFrames: [String: CGRect] = [:]
     @State private var suppressTapUntil = Date.distantPast
+    /// 拖动起点与当前手指位置（内容坐标系），用于让浮动卡片跟手。
+    @State private var dragStart: CGPoint?
+    @State private var dragLocation: CGPoint?
 
     /// 存储UINavigationController的引用
     static var navigationController: UINavigationController?
@@ -407,6 +410,9 @@ struct ContentView: View {
             .padding(.bottom, 32)
             // 排序拖拽用到的坐标系与卡片位置缓存
             .coordinateSpace(name: "host-content")
+            .overlay(alignment: .topLeading) {
+                dragPreviewLayer
+            }
             .onPreferenceChange(HostCardFrameKey.self) { frames in
                 cardFrames = frames
             }
@@ -482,9 +488,9 @@ struct ContentView: View {
 
     // MARK: - Cards
 
-    private func appCard(_ item: HostHubItem) -> some View {
-        let transfer = catalog.transfers[item.appId]
-        return VStack(alignment: .leading, spacing: 0) {
+    /// 卡片视觉本体：首页网格与拖动浮层共用同一套样式，浮层才不会走样。
+    private func cardBase(_ item: HostHubItem, transfer: HostTransferState?) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
                 appIcon(item, size: 48, corner: 15, fontSize: 21)
                 Spacer(minLength: 4)
@@ -525,26 +531,24 @@ struct ContentView: View {
                     lineWidth: 1
                 )
         )
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: HostCardFrameKey.self,
-                    value: draggingId == item.appId
-                        ? [String: CGRect]()
-                        : [item.appId: proxy.frame(in: .named("host-content"))]
-                )
-            }
-        )
-        .scaleEffect(draggingId == item.appId ? 1.06 : 1)
-        .shadow(
-            color: .black.opacity(draggingId == item.appId ? 0.16 : 0),
-            radius: draggingId == item.appId ? 16 : 0,
-            x: 0,
-            y: draggingId == item.appId ? 10 : 0
-        )
-        // 拿起/放下时有个带点回弹的过渡，不会「啪」一下变大小。
-        .animation(.spring(response: 0.3, dampingFraction: 0.68), value: draggingId == item.appId)
-        .zIndex(draggingId == item.appId ? 1 : 0)
+    }
+
+    private func appCard(_ item: HostHubItem) -> some View {
+        let transfer = catalog.transfers[item.appId]
+        return cardBase(item, transfer: transfer)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: HostCardFrameKey.self,
+                        value: draggingId == item.appId
+                            ? [String: CGRect]()
+                            : [item.appId: proxy.frame(in: .named("host-content"))]
+                    )
+                }
+            )
+            // 被拖起来的那张只在原位留个淡影，跟手的是最上层的浮层。
+            .opacity(draggingId == item.appId ? 0.28 : 1)
+            .zIndex(draggingId == item.appId ? 1 : 0)
         .contentShape(Rectangle())
         .onTapGesture {
             guard Date() >= suppressTapUntil else { return }
@@ -558,10 +562,13 @@ struct ContentView: View {
                     if draggingId == nil {
                         dragFrames = cardFrames
                         draggingId = item.appId
+                        dragStart = drag.location
+                        dragLocation = drag.location
                         // 长按已经算「排序 / 详情」，压掉随后可能补发的点击
                         suppressTapUntil = Date().addingTimeInterval(5)
                     }
                     guard draggingId == item.appId else { return }
+                    dragLocation = drag.location
                     if let target = dragFrames.first(where: {
                         $0.key != item.appId && $0.value.contains(drag.location)
                     })?.key {
@@ -575,6 +582,8 @@ struct ContentView: View {
                         moved = abs(drag.translation.width) > 6 || abs(drag.translation.height) > 6
                     }
                     draggingId = nil
+                    dragStart = nil
+                    dragLocation = nil
                     suppressTapUntil = Date().addingTimeInterval(0.35)
                     // 长按但没挪动 → 打开详情；拖动过则已经完成排序。
                     if !moved {
@@ -584,10 +593,9 @@ struct ContentView: View {
         )
     }
 
-    /// 单列模式：图标 + 名称/版本 + 右侧状态，名称可以完整占一行。
-    private func appRow(_ item: HostHubItem) -> some View {
-        let transfer = catalog.transfers[item.appId]
-        return HStack(spacing: 12) {
+    /// 单列模式的视觉本体：图标 + 名称/版本 + 右侧状态，同样被拖动浮层复用。
+    private func rowBase(_ item: HostHubItem, transfer: HostTransferState?) -> some View {
+        HStack(spacing: 12) {
             appIcon(item, size: 48, corner: 15, fontSize: 21)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -619,26 +627,24 @@ struct ContentView: View {
                     lineWidth: 1
                 )
         )
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: HostCardFrameKey.self,
-                    value: draggingId == item.appId
-                        ? [String: CGRect]()
-                        : [item.appId: proxy.frame(in: .named("host-content"))]
-                )
-            }
-        )
-        .scaleEffect(draggingId == item.appId ? 1.06 : 1)
-        .shadow(
-            color: .black.opacity(draggingId == item.appId ? 0.16 : 0),
-            radius: draggingId == item.appId ? 16 : 0,
-            x: 0,
-            y: draggingId == item.appId ? 10 : 0
-        )
-        // 拿起/放下时有个带点回弹的过渡，不会「啪」一下变大小。
-        .animation(.spring(response: 0.3, dampingFraction: 0.68), value: draggingId == item.appId)
-        .zIndex(draggingId == item.appId ? 1 : 0)
+    }
+
+    private func appRow(_ item: HostHubItem) -> some View {
+        let transfer = catalog.transfers[item.appId]
+        return rowBase(item, transfer: transfer)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: HostCardFrameKey.self,
+                        value: draggingId == item.appId
+                            ? [String: CGRect]()
+                            : [item.appId: proxy.frame(in: .named("host-content"))]
+                    )
+                }
+            )
+            // 被拖起来的那张只在原位留个淡影，跟手的是最上层的浮层。
+            .opacity(draggingId == item.appId ? 0.28 : 1)
+            .zIndex(draggingId == item.appId ? 1 : 0)
         .contentShape(Rectangle())
         .onTapGesture {
             guard Date() >= suppressTapUntil else { return }
@@ -652,10 +658,13 @@ struct ContentView: View {
                     if draggingId == nil {
                         dragFrames = cardFrames
                         draggingId = item.appId
+                        dragStart = drag.location
+                        dragLocation = drag.location
                         // 长按已经算「排序 / 详情」，压掉随后可能补发的点击
                         suppressTapUntil = Date().addingTimeInterval(5)
                     }
                     guard draggingId == item.appId else { return }
+                    dragLocation = drag.location
                     if let target = dragFrames.first(where: {
                         $0.key != item.appId && $0.value.contains(drag.location)
                     })?.key {
@@ -669,6 +678,8 @@ struct ContentView: View {
                         moved = abs(drag.translation.width) > 6 || abs(drag.translation.height) > 6
                     }
                     draggingId = nil
+                    dragStart = nil
+                    dragLocation = nil
                     suppressTapUntil = Date().addingTimeInterval(0.35)
                     // 长按但没挪动 → 打开详情；拖动过则已经完成排序。
                     if !moved {
@@ -707,6 +718,34 @@ struct ContentView: View {
         // 换位时给一点触感，拖动不至于「无声无息」。
         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
         UserDefaults.standard.set(manualOrder, forKey: Self.appOrderKey)
+    }
+
+    /// 拖动时盖在最上层的「跟手」卡片：位置只由手指位移决定，
+    /// 与网格里的换位动画互不干扰，看起来才不会一跳一跳。
+    @ViewBuilder
+    private var dragPreviewLayer: some View {
+        if let id = draggingId,
+           let frame = dragFrames[id],
+           let start = dragStart,
+           let location = dragLocation,
+           let item = hubItems.first(where: { $0.appId == id }) {
+            let transfer = catalog.transfers[id]
+            Group {
+                if listLayout {
+                    rowBase(item, transfer: transfer)
+                } else {
+                    cardBase(item, transfer: transfer)
+                }
+            }
+            .frame(width: frame.width, height: frame.height)
+            .scaleEffect(1.05)
+            .shadow(color: .black.opacity(0.18), radius: 18, x: 0, y: 10)
+            .offset(
+                x: frame.minX + location.x - start.x,
+                y: frame.minY + location.y - start.y
+            )
+            .allowsHitTesting(false)
+        }
     }
 
     @ViewBuilder

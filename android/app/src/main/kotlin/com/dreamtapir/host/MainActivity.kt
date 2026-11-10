@@ -121,6 +121,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
@@ -694,11 +695,11 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                     modifier = Modifier
                         .offset { IntOffset(topLeft.x.roundToInt(), topLeft.y.roundToInt()) }
                         .size(previewWidth, previewHeight)
+                        .shadow(16.dp, RoundedCornerShape(22.dp))
                         .graphicsLayer {
                             scaleX = 1.05f
                             scaleY = 1.05f
-                        }
-                        .shadow(16.dp, RoundedCornerShape(22.dp)),
+                        },
                 ) {
                     if (catalog.config.listLayout) {
                         AppListRow(
