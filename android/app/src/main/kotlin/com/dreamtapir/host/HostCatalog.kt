@@ -332,11 +332,24 @@ class HostCatalogController(
 
         val result = withContext(Dispatchers.IO) {
             runCatching {
-                val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                // apps.json 决定「有没有新版本」：下拉刷新/检查更新时带上时间戳，
+                // 穿透 CDN 与反向代理的缓存，避免一直读到旧副本。
+                val requestUrl = if (force) {
+                    Uri.parse(url)
+                        .buildUpon()
+                        .appendQueryParameter("_t", System.currentTimeMillis().toString())
+                        .build()
+                        .toString()
+                } else {
+                    url
+                }
+                val connection = (URL(requestUrl).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 20_000
                     readTimeout = 20_000
                     requestMethod = "GET"
+                    useCaches = false
                     setRequestProperty("Accept", "application/json")
+                    setRequestProperty("Cache-Control", "no-cache")
                     applyAuth()
                     if (!force) {
                         HostCatalogStore.etag(context)?.let {

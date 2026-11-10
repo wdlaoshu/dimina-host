@@ -371,8 +371,12 @@ final class DMPRemoteUpdateManager {
     }
 
     private func requestData(url: URL) async throws -> (Data, URLResponse) {
-        try await withCheckedThrowingContinuation { continuation in
-            URLSession.shared.dataTask(with: url) { data, response, error in
+        // 更新清单决定「有没有新版本」，同样不能读 URLCache 里的旧副本
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        return try await withCheckedThrowingContinuation { continuation in
+            URLSession.shared.dataTask(with: request) { data, response, error in
                 if let error {
                     continuation.resume(throwing: error)
                     return

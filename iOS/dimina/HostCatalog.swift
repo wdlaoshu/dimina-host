@@ -468,7 +468,21 @@ final class HostCatalogCenter: ObservableObject {
         syncState = .syncing
         var request = authorizedRequest(url, timeout: 20)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if !force, let etag, !etag.isEmpty {
+        // apps.json 决定「有没有新版本」，不能命中本地 HTTP 缓存：
+        // 默认的 useProtocolCachePolicy 在响应带 Cache-Control/Expires 时会直接返回旧副本，
+        // 连 If-None-Match 都发不出去，表现就是小程序发了新版、宿主列表一直不变。
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        if force {
+            // 下拉刷新 / 检查更新再穿透一层 CDN 与反向代理：缓存键带上时间戳
+            if var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+                var items = components.queryItems ?? []
+                items.removeAll { $0.name == "_t" }
+                items.append(URLQueryItem(name: "_t", value: String(Int(Date().timeIntervalSince1970))))
+                components.queryItems = items
+                if let busted = components.url { request.url = busted }
+            }
+        } else if let etag, !etag.isEmpty {
             request.setValue(etag, forHTTPHeaderField: "If-None-Match")
         }
 
