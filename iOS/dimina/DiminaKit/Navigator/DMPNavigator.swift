@@ -143,11 +143,12 @@ public class DMPNavigator: NSObject {
         capsuleView.backgroundColor = fillColor
         capsuleView.layer.cornerRadius = DMPMenuButtonLayout.capsuleSize.height / 2
         capsuleView.layer.borderWidth = 0.5
-        capsuleView.layer.borderColor = UIColor { traits in
+        let borderColor: UIColor = UIColor { traits in
             traits.userInterfaceStyle == .dark
-                ? UIColor(red: 0.2, green: 0.22, blue: 0.28, alpha: 1).cgColor  // 深底上的细分隔
-                : UIColor(red: 229 / 255, green: 229 / 255, blue: 229 / 255, alpha: 1).cgColor
-        }.cgColor
+                ? UIColor(red: 0.2, green: 0.22, blue: 0.28, alpha: 1)
+                : UIColor(red: 229 / 255, green: 229 / 255, blue: 229 / 255, alpha: 1)
+        }
+        capsuleView.layer.borderColor = borderColor.cgColor
         capsuleView.layer.shadowColor = UIColor.black.cgColor
         // A layer shadow also sits underneath the fill, affecting translucent colors.
         capsuleView.layer.shadowOpacity = fillColor.cgColor.alpha == 1 ? 0.08 : 0
