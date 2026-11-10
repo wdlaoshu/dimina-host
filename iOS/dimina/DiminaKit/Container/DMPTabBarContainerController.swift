@@ -78,10 +78,11 @@ final class DMPTabBarContainerController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = DMPUtil.colorFromHexString(tabBarConfig.backgroundColor) ?? .white
         setupViews()
-        // 自定义 tabBar 时原生栏隐藏，由小程序 custom-tab-bar 组件自行渲染。
+        // custom tabBar 由小程序的 custom-tab-bar 组件渲染，原生 tabBar 隐藏并让出高度
         if tabBarConfig.custom {
-            setTabBarVisible(false)
+            tabBarView.isHidden = true
         }
+        updateTabBarHeight()
         attachLoadedTabIfNeeded(selectedIndex)
         updateVisibleTab()
     }
@@ -89,6 +90,22 @@ final class DMPTabBarContainerController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         navigationController?.setNavigationBarHidden(true, animated: false)
+        applyStatusBarStyleForCurrentTab()
+    }
+
+    /// 状态栏图标颜色跟随当前 tab 页自身的导航栏深浅，而不是宿主的 window 外观。
+    /// 容器是导航栈顶时系统只问容器，不会下钻到子页面控制器，所以这里要显式同步。
+    private func applyStatusBarStyleForCurrentTab() {
+        guard let navStyle = tabPageRecords[selectedIndex]?.navStyle else {
+            // 页面还没加载出来时交还给宿主/系统外观，避免误判成浅色
+            overrideUserInterfaceStyle = .unspecified
+            return
+        }
+        let isDarkNav = (navStyle["navigationBarTextStyle"] as? String) == "white"
+        let style: UIUserInterfaceStyle = isDarkNav ? .dark : .light
+        guard overrideUserInterfaceStyle != style else { return }
+        overrideUserInterfaceStyle = style
+        setNeedsStatusBarAppearanceUpdate()
     }
 
     override func viewSafeAreaInsetsDidChange() {
@@ -185,9 +202,14 @@ final class DMPTabBarContainerController: UIViewController {
     }
 
     func setTabBarVisible(_ visible: Bool) {
-        // 自定义 tabBar 应用始终隐藏原生栏，避免 wx.showTabBar 把原生栏再叫出来。
-        let effectiveVisible = tabBarConfig.custom ? false : visible
-        tabBarView.isHidden = !effectiveVisible
+        // custom tabBar 由小程序的 custom-tab-bar 组件渲染，原生 tabBar 不参与显示
+        guard !tabBarConfig.custom else {
+            tabBarView.isHidden = true
+            updateTabBarHeight()
+            return
+        }
+
+        tabBarView.isHidden = !visible
         updateTabBarHeight()
         view.layoutIfNeeded()
     }
@@ -317,6 +339,7 @@ final class DMPTabBarContainerController: UIViewController {
                 contentView.bringSubviewToFront(controller.view)
             }
         }
+        applyStatusBarStyleForCurrentTab()
     }
 
     private var tabBarHeight: CGFloat {

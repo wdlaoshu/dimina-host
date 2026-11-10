@@ -510,6 +510,18 @@ public class DMPPageController: UIViewController {
         customNavigationTitleLabel?.textColor = textColor
         updateCustomBackButton(darkStyle: darkStyle)
         updateCustomHomeButton(darkStyle: darkStyle)
+        applyStatusBarStyle(darkStyle: darkStyle)
+    }
+
+    /// 状态栏图标颜色跟随小程序自身导航栏深浅，而不是宿主的 window 外观。
+    /// 宿主可能是深色、小程序页面是浅色，此时状态栏必须用深色图标，
+    /// 否则就是白字压在浅底上（“雾蒙蒙”）。
+    /// 只覆盖当前页面控制器的外观，不改共享 window，返回宿主不受影响。
+    private func applyStatusBarStyle(darkStyle: Bool) {
+        let style: UIUserInterfaceStyle = darkStyle ? .dark : .light
+        guard overrideUserInterfaceStyle != style else { return }
+        overrideUserInterfaceStyle = style
+        setNeedsStatusBarAppearanceUpdate()
     }
 
     private func updateCustomBackButton(darkStyle: Bool) {

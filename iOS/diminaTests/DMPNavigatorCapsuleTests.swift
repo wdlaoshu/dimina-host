@@ -216,7 +216,11 @@ final class DMPNavigatorCapsuleTests: XCTestCase {
             }
             XCTAssertEqual(capsule.layer.borderColor, UIColor(red: 229 / 255, green: 229 / 255, blue: 229 / 255, alpha: 1).cgColor)
             let separator = try XCTUnwrap(capsule.subviews.first { !($0 is UIButton) })
-            XCTAssertEqual(separator.backgroundColor, UIColor(red: 233 / 255, green: 233 / 255, blue: 233 / 255, alpha: 1))
+            // 分隔线现在是跟随深浅主题的动态色，按当前 trait 解析后再比较
+            XCTAssertEqual(
+                separator.backgroundColor?.resolvedColor(with: separator.traitCollection),
+                UIColor(red: 233 / 255, green: 233 / 255, blue: 233 / 255, alpha: 1)
+            )
         }
     }
 
