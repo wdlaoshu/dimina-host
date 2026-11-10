@@ -278,15 +278,15 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
     val gridState = rememberLazyGridState()
     val hostView = LocalView.current
 
+    fun refreshRunning() {
+        runningApps = runCatching { Dimina.getInstance().runningMiniPrograms() }
+            .getOrDefault(emptyList())
+    }
+
     fun refresh() {
         apps = HostAppRepository.load(context)
         recentIds = RecentApps.load(context).filter { id -> apps.any { it.appId == id } }
         refreshRunning()
-    }
-
-    fun refreshRunning() {
-        runningApps = runCatching { Dimina.getInstance().runningMiniPrograms() }
-            .getOrDefault(emptyList())
     }
 
     fun showMessage(message: String) {
