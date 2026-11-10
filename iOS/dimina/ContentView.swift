@@ -27,7 +27,7 @@ struct ContentView: View {
     @State private var uninstallTarget: HostApp?
     @State private var showUninstallConfirm = false
     @State private var isInstalling = false
-    @State private var toast: String?
+    @State private var toast: HostToast?
     @State private var didStartupCheck = false
 
     // 存储UINavigationController的引用
@@ -52,18 +52,19 @@ struct ContentView: View {
 
             if isInstalling {
                 installingOverlay
+                    .transition(.opacity)
             }
 
             if let toast {
-                Text(toast)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(Color.black.opacity(0.82))
-                    .clipShape(Capsule())
-                    .padding(.bottom, 26)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                HostToastView(toast: toast)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 28)
+                    .transition(
+                        .asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom))
+                        )
+                    )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -128,10 +129,10 @@ struct ContentView: View {
                 do {
                     pendingImport = try HostStore.prepareImport(from: url)
                 } catch {
-                    showToast("读取失败：\(error.localizedDescription)")
+                    showToast("读取失败：\(error.localizedDescription)", kind: .error)
                 }
             case .failure(let error):
-                showToast("选择文件失败：\(error.localizedDescription)")
+                showToast("选择文件失败：\(error.localizedDescription)", kind: .error)
             }
         }
         .alert(item: $pendingImport) { pkg in
@@ -486,17 +487,8 @@ struct ContentView: View {
 
             // 下载/安装中把版本行换成进度，卡片高度保持不变。
             if transfer?.isBusy == true {
-                Group {
-                    if let progress = transfer?.progress {
-                        ProgressView(value: progress)
-                            .tint(HostTheme.primary)
-                    } else {
-                        ProgressView()
-                            .tint(HostTheme.primary)
-                            .scaleEffect(0.6, anchor: .leading)
-                    }
-                }
-                .padding(.top, 8)
+                HostProgressBar(value: transfer?.progress)
+                    .padding(.top, 10)
             } else {
                 Text(item.subtitle)
                     .font(.system(size: 10))
@@ -764,18 +756,10 @@ struct ContentView: View {
 
     private var installingOverlay: some View {
         ZStack {
-            Color.black.opacity(0.35).ignoresSafeArea()
-            HStack(spacing: 14) {
-                ProgressView()
-                    .tint(HostTheme.primary)
-                Text("正在安装小程序…")
-                    .font(.system(size: 14))
-                    .foregroundColor(HostTheme.text)
-            }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 18)
-            .background(HostTheme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+                .transition(.opacity)
+            HostLoadingCard(title: "正在安装小程序", subtitle: "请稍候，马上就好")
         }
     }
 
@@ -845,7 +829,7 @@ struct ContentView: View {
     private func sync(force: Bool) async {
         await catalog.sync(force: force)
         if case let .failed(message) = catalog.syncState {
-            showToast(message)
+            showToast(message, kind: .error)
             return
         }
         if case .ok = catalog.syncState {
@@ -874,7 +858,7 @@ struct ContentView: View {
                 completed += 1
                 store.reload()
             } catch {
-                showToast("\(item.name)：\(HostCatalogCenter.describe(error))")
+                showToast("\(item.name)：\(HostCatalogCenter.describe(error))", kind: .error)
             }
         }
         if completed > 0 {
@@ -889,7 +873,7 @@ struct ContentView: View {
             store.reload()
             showToast("已更新 \(remote.name)，下次打开生效")
         } catch {
-            showToast("\(remote.name)：\(HostCatalogCenter.describe(error))")
+            showToast("\(remote.name)：\(HostCatalogCenter.describe(error))", kind: .error)
         }
     }
 
@@ -905,7 +889,7 @@ struct ContentView: View {
         store.recordRecent(app.appId)
 
         guard let navController = ContentView.navigationController else {
-            showToast("导航控制器尚未就绪")
+            showToast("导航控制器尚未就绪", kind: .error)
             return
         }
 
@@ -941,14 +925,14 @@ struct ContentView: View {
     }
 
     private func install(_ package: HostImportPackage) async {
-        isInstalling = true
+        withAnimation(.easeInOut(duration: 0.2)) { isInstalling = true }
         do {
             try await store.install(package)
             showToast("已导入 \(package.name)")
         } catch {
-            showToast("导入失败：\(error.localizedDescription)")
+            showToast("导入失败：\(error.localizedDescription)", kind: .error)
         }
-        isInstalling = false
+        withAnimation(.easeInOut(duration: 0.2)) { isInstalling = false }
     }
 
     private func uninstall(_ app: HostApp, clearData: Bool) async {
@@ -960,17 +944,17 @@ struct ContentView: View {
             store.reload()
             showToast(clearData ? "已卸载并清除数据 \(app.name)" : "已卸载 \(app.name)")
         } catch {
-            showToast("卸载失败：\(error.localizedDescription)")
+            showToast("卸载失败：\(error.localizedDescription)", kind: .error)
         }
     }
 
-    private func showToast(_ message: String) {
-        withAnimation {
-            toast = message
+    private func showToast(_ message: String, kind: HostToastKind = .success) {
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+            toast = HostToast(message: message, kind: kind)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.8) {
-            if toast == message {
-                withAnimation {
+            if toast?.message == message {
+                withAnimation(.easeOut(duration: 0.22)) {
                     toast = nil
                 }
             }
@@ -1108,7 +1092,7 @@ private struct HostAppDetailSheet: View {
                     } label: {
                         HStack(spacing: 6) {
                             if isChecking {
-                                ProgressView().tint(HostTheme.text)
+                                HostSpinner(size: 13)
                             } else {
                                 Image(systemName: "arrow.triangle.2.circlepath")
                             }
@@ -1263,31 +1247,43 @@ private struct HostAppDetailSheet: View {
     }
 
     private func transferCard(_ state: HostTransferState) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             switch state {
-            case let .downloading(progress):
-                ProgressView(value: progress >= 0 ? progress : 0.05)
-                    .frame(width: 90)
-                Text(progress >= 0 ? "下载中 \(Int(progress * 100))%" : "正在连接下载…")
-            case .verifying:
-                ProgressView().tint(HostTheme.primary)
-                Text("校验安装包…")
-            case .installing:
-                ProgressView().tint(HostTheme.primary)
-                Text("安装中…")
-            case let .failed(message):
+            case .downloading:
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 15))
+                    .foregroundColor(HostTheme.primary)
+            case .verifying, .installing:
+                HostSpinner(size: 16)
+            case .failed:
                 Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 15))
                     .foregroundColor(HostTheme.red)
-                Text(message)
             }
+
+            VStack(alignment: .leading, spacing: 7) {
+                switch state {
+                case let .downloading(progress):
+                    Text(progress >= 0 ? "正在下载 \(Int(progress * 100))%" : "正在连接下载…")
+                    HostProgressBar(value: progress >= 0 ? progress : nil)
+                case .verifying:
+                    Text("校验安装包…")
+                case .installing:
+                    Text("安装中…")
+                case let .failed(message):
+                    Text(message)
+                        .foregroundColor(HostTheme.red)
+                }
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(HostTheme.text)
+
+            Spacer(minLength: 0)
         }
-        .font(.system(size: 12))
-        .foregroundColor(HostTheme.text)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .background(HostTheme.bg)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private func noticeCard(_ message: String) -> some View {
@@ -1433,16 +1429,16 @@ private struct HostUpdateCenterSheet: View {
                         .font(.system(size: 11))
                         .foregroundColor(HostTheme.muted)
                 }
-                if let progress = transfer?.progress {
-                    ProgressView(value: progress)
-                        .tint(HostTheme.primary)
+                if transfer?.isBusy == true {
+                    HostProgressBar(value: transfer?.progress)
+                        .padding(.top, 4)
                 }
             }
 
             Spacer()
 
             if transfer?.isBusy == true {
-                ProgressView().tint(HostTheme.primary)
+                HostSpinner(size: 18)
             } else {
                 Button {
                     Task { await onInstallOne(item) }
@@ -2086,6 +2082,188 @@ enum HostThemeMode: String, CaseIterable {
         case .dark: return .dark
         case .system: return nil
         }
+    }
+}
+
+// MARK: - Host feedback components
+
+enum HostToastKind {
+    case success
+    case info
+    case error
+
+    var tint: Color {
+        switch self {
+        case .success: return HostTheme.green
+        case .info: return HostTheme.primary
+        case .error: return HostTheme.red
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .success: return "checkmark"
+        case .info: return "info"
+        case .error: return "exclamationmark"
+        }
+    }
+}
+
+struct HostToast {
+    let message: String
+    let kind: HostToastKind
+}
+
+/// 悬浮提示：毛玻璃卡片 + 语义色图标，替代原先的纯黑胶囊。
+struct HostToastView: View {
+    let toast: HostToast
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(toast.kind.tint.opacity(0.16))
+                    .frame(width: 24, height: 24)
+                Image(systemName: toast.kind.symbol)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(toast.kind.tint)
+            }
+
+            Text(toast.message)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(HostTheme.text)
+                .multilineTextAlignment(.leading)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 16)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(HostTheme.surface.opacity(0.55))
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(HostTheme.line.opacity(0.8), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.16), radius: 18, y: 8)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// 宿主统一的活动指示器：渐变弧线旋转，比系统菊花更贴合卡片风格。
+struct HostSpinner: View {
+    var size: CGFloat = 20
+    @State private var rotating = false
+
+    private var lineWidth: CGFloat { max(2, size * 0.12) }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(HostTheme.line, lineWidth: lineWidth)
+            Circle()
+                .trim(from: 0.06, to: 0.34)
+                .stroke(
+                    AngularGradient(
+                        colors: [HostTheme.primary.opacity(0.2), HostTheme.primary],
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                )
+                .rotationEffect(.degrees(rotating ? 360 : 0))
+        }
+        .frame(width: size, height: size)
+        .onAppear {
+            withAnimation(.linear(duration: 0.85).repeatForever(autoreverses: false)) {
+                rotating = true
+            }
+        }
+    }
+}
+
+/// 居中加载卡片：用于安装等会挡住整页的操作。
+struct HostLoadingCard: View {
+    let title: String
+    var subtitle: String? = nil
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HostSpinner(size: 36)
+            VStack(spacing: 5) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(HostTheme.text)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundColor(HostTheme.muted)
+                }
+            }
+        }
+        .padding(.horizontal, 34)
+        .padding(.vertical, 26)
+        .frame(minWidth: 200)
+        .background(
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .fill(HostTheme.surface.opacity(0.6))
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(HostTheme.line.opacity(0.8), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.2), radius: 28, y: 14)
+        .transition(.scale(scale: 0.95).combined(with: .opacity))
+    }
+}
+
+/// 细进度条：确定进度时按比例填充，进度未知时做来回扫光。
+struct HostProgressBar: View {
+    var value: Double?
+    @State private var sweeping = false
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(HostTheme.line)
+                if let value {
+                    Capsule()
+                        .fill(barGradient)
+                        .frame(width: max(geo.size.width * min(max(value, 0), 1), 5))
+                        .animation(.easeOut(duration: 0.25), value: value)
+                } else {
+                    Capsule()
+                        .fill(barGradient)
+                        .frame(width: max(geo.size.width * 0.3, 20))
+                        .offset(x: sweeping ? geo.size.width * 0.7 : 0)
+                        .animation(
+                            .easeInOut(duration: 1.15).repeatForever(autoreverses: true),
+                            value: sweeping
+                        )
+                }
+            }
+            .clipShape(Capsule())
+        }
+        .frame(height: 5)
+        .onAppear { sweeping = true }
+    }
+
+    private var barGradient: LinearGradient {
+        LinearGradient(
+            colors: [HostTheme.primary.opacity(0.65), HostTheme.primary],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
     }
 }
 
