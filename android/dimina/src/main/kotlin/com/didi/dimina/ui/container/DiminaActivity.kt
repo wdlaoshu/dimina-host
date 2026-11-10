@@ -159,7 +159,7 @@ class DiminaActivity : ComponentActivity() {
 
     // 系统深浅模式缓存（onCreate 时读一次；用户切换系统深色/浅色不会在 Activity 生命周期内
     // 触发 DiminaActivity 重建，按宿主 app 重启时刷新即可）
-    private lateinit var isDarkSystem: Boolean
+    private var isDarkSystem: Boolean = false
 
     // UI state for navigation bar
     private val showNavigationBar = mutableStateOf(true)
