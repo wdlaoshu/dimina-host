@@ -608,8 +608,8 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                                                     }?.also {
                                                         // 换位后删掉位移差，卡片保持贴手
                                                         dragOffset -= Offset(
-                                                            it.offset.x - info.offset.x,
-                                                            it.offset.y - info.offset.y,
+                                                            (it.offset.x - info.offset.x).toFloat(),
+                                                            (it.offset.y - info.offset.y).toFloat(),
                                                         )
                                                     }
                                                 }
