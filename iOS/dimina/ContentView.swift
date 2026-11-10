@@ -29,12 +29,20 @@ struct ContentView: View {
     @State private var isInstalling = false
     @State private var toast: HostToast?
     @State private var didStartupCheck = false
+    /// 长按拖动排序后的顺序（appId），持久化在本地。
+    @State private var manualOrder: [String] = []
+    @State private var draggingId: String?
+    @State private var cardFrames: [String: CGRect] = [:]
+    @State private var dragFrames: [String: CGRect] = [:]
+    @State private var suppressTapUntil = Date.distantPast
 
-    // 存储UINavigationController的引用
+    /// 存储UINavigationController的引用
     static var navigationController: UINavigationController?
 
-    // 自动化测试钩子的一次性标记（见 autoOpenAppForTestIfRequested）
+    /// 自动化测试钩子的一次性标记（见 autoOpenAppForTestIfRequested）
     static var didAutoOpenForTest = false
+
+    private static let appOrderKey = "dimina.host.appOrder"
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -69,6 +77,7 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
+            manualOrder = UserDefaults.standard.stringArray(forKey: Self.appOrderKey) ?? []
             permissions.refresh()
             autoOpenAppForTestIfRequested()
             await startupCheck()
@@ -396,6 +405,11 @@ struct ContentView: View {
             .padding(.horizontal, 16)
             .padding(.top, 6)
             .padding(.bottom, 32)
+            // 排序拖拽用到的坐标系与卡片位置缓存
+            .coordinateSpace(name: "host-content")
+            .onPreferenceChange(HostCardFrameKey.self) { frames in
+                cardFrames = frames
+            }
         }
         .scrollIndicators(.hidden)
         // 搜索框弹出键盘后，点列表空白处或拖动列表都要能收起键盘，
@@ -511,13 +525,55 @@ struct ContentView: View {
                     lineWidth: 1
                 )
         )
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: HostCardFrameKey.self,
+                    value: draggingId == item.appId
+                        ? [String: CGRect]()
+                        : [item.appId: proxy.frame(in: .named("host-content"))]
+                )
+            }
+        )
+        .scaleEffect(draggingId == item.appId ? 1.04 : 1)
+        .zIndex(draggingId == item.appId ? 1 : 0)
         .contentShape(Rectangle())
         .onTapGesture {
+            guard Date() >= suppressTapUntil else { return }
             activate(item)
         }
-        .onLongPressGesture(minimumDuration: 0.35) {
-            selectedItem = item
-        }
+        .gesture(
+            LongPressGesture(minimumDuration: 0.3)
+                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("host-content")))
+                .onChanged { value in
+                    guard case let .second(true, drag?) = value else { return }
+                    if draggingId == nil {
+                        dragFrames = cardFrames
+                        draggingId = item.appId
+                        // 长按已经算「排序 / 详情」，压掉随后可能补发的点击
+                        suppressTapUntil = Date().addingTimeInterval(5)
+                    }
+                    guard draggingId == item.appId else { return }
+                    if let target = dragFrames.first(where: {
+                        $0.key != item.appId && $0.value.contains(drag.location)
+                    })?.key {
+                        moveCard(item.appId, over: target)
+                    }
+                }
+                .onEnded { value in
+                    guard draggingId == item.appId else { return }
+                    var moved = false
+                    if case let .second(true, drag?) = value {
+                        moved = abs(drag.translation.width) > 6 || abs(drag.translation.height) > 6
+                    }
+                    draggingId = nil
+                    suppressTapUntil = Date().addingTimeInterval(0.35)
+                    // 长按但没挪动 → 打开详情；拖动过则已经完成排序。
+                    if !moved {
+                        selectedItem = item
+                    }
+                }
+        )
     }
 
     /// 单列模式：图标 + 名称/版本 + 右侧状态，名称可以完整占一行。
@@ -555,13 +611,55 @@ struct ContentView: View {
                     lineWidth: 1
                 )
         )
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: HostCardFrameKey.self,
+                    value: draggingId == item.appId
+                        ? [String: CGRect]()
+                        : [item.appId: proxy.frame(in: .named("host-content"))]
+                )
+            }
+        )
+        .scaleEffect(draggingId == item.appId ? 1.04 : 1)
+        .zIndex(draggingId == item.appId ? 1 : 0)
         .contentShape(Rectangle())
         .onTapGesture {
+            guard Date() >= suppressTapUntil else { return }
             activate(item)
         }
-        .onLongPressGesture(minimumDuration: 0.35) {
-            selectedItem = item
-        }
+        .gesture(
+            LongPressGesture(minimumDuration: 0.3)
+                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("host-content")))
+                .onChanged { value in
+                    guard case let .second(true, drag?) = value else { return }
+                    if draggingId == nil {
+                        dragFrames = cardFrames
+                        draggingId = item.appId
+                        // 长按已经算「排序 / 详情」，压掉随后可能补发的点击
+                        suppressTapUntil = Date().addingTimeInterval(5)
+                    }
+                    guard draggingId == item.appId else { return }
+                    if let target = dragFrames.first(where: {
+                        $0.key != item.appId && $0.value.contains(drag.location)
+                    })?.key {
+                        moveCard(item.appId, over: target)
+                    }
+                }
+                .onEnded { value in
+                    guard draggingId == item.appId else { return }
+                    var moved = false
+                    if case let .second(true, drag?) = value {
+                        moved = abs(drag.translation.width) > 6 || abs(drag.translation.height) > 6
+                    }
+                    draggingId = nil
+                    suppressTapUntil = Date().addingTimeInterval(0.35)
+                    // 长按但没挪动 → 打开详情；拖动过则已经完成排序。
+                    if !moved {
+                        selectedItem = item
+                    }
+                }
+        )
     }
 
     private func activate(_ item: HostHubItem) {
@@ -570,6 +668,27 @@ struct ContentView: View {
         } else {
             selectedItem = item
         }
+    }
+
+    /// 长按拖到另一张卡片上时，把拖拽项移动到目标位置并持久化。
+    private func moveCard(_ dragging: String, over targetId: String) {
+        // 首次排序或遇到新装的应用，先用当前展示顺序播种。
+        if manualOrder.isEmpty
+            || !manualOrder.contains(dragging)
+            || !manualOrder.contains(targetId) {
+            manualOrder = hubItems.map(\.appId)
+        }
+
+        guard let from = manualOrder.firstIndex(of: dragging),
+              let to = manualOrder.firstIndex(of: targetId),
+              from != to
+        else { return }
+
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+            let moved = manualOrder.remove(at: from)
+            manualOrder.insert(moved, at: to)
+        }
+        UserDefaults.standard.set(manualOrder, forKey: Self.appOrderKey)
     }
 
     @ViewBuilder
@@ -607,7 +726,8 @@ struct ContentView: View {
                 .padding(.vertical, 3)
                 .background(HostTheme.bg)
                 .clipShape(Capsule())
-        } else if item.installed && !item.bundled {
+        } else if item.local?.importedLocally == true {
+            // 只有用户自己从本地 ZIP 导入的包才标「导入」，云端下载的不标。
             Text("导入")
                 .font(.system(size: 9, weight: .medium))
                 .foregroundColor(HostTheme.primary)
@@ -778,8 +898,29 @@ struct ContentView: View {
         for remote in catalog.remoteApps where !seen.contains(remote.appId) {
             items.append(HostHubItem(appId: remote.appId, local: nil, remote: remote))
         }
-        return items.sorted {
+        return orderedByUser(items.sorted {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        })
+    }
+
+    /// 用户长按拖动排好的顺序优先；没排过的（新装 / 新上架）按名称排在后面。
+    private func orderedByUser(_ items: [HostHubItem]) -> [HostHubItem] {
+        guard !manualOrder.isEmpty else { return items }
+        let index = Dictionary(
+            manualOrder.enumerated().map { ($1, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return items.sorted { a, b in
+            switch (index[a.appId], index[b.appId]) {
+            case let (x?, y?):
+                return x < y
+            case (.some, .none):
+                return true
+            case (.none, .some):
+                return false
+            case (.none, .none):
+                return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+            }
         }
     }
 
@@ -795,7 +936,9 @@ struct ContentView: View {
         var items: [HostHubItem]
         switch filter {
         case .recent:
-            items = store.recentIds.compactMap { id in hubItems.first { $0.appId == id } }
+            items = orderedByUser(store.recentIds.compactMap { id in
+                hubItems.first { $0.appId == id }
+            })
         case .all:
             items = hubItems
         case .updates:
@@ -2264,6 +2407,15 @@ struct HostProgressBar: View {
             startPoint: .leading,
             endPoint: .trailing
         )
+    }
+}
+
+/// 收集每张卡片在滚动内容坐标系里的位置，供长按拖动排序做命中判断。
+private struct HostCardFrameKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
     }
 }
 

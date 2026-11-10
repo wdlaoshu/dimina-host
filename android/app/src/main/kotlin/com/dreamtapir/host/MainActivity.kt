@@ -24,6 +24,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,6 +43,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items as rowItems
 import androidx.compose.foundation.rememberScrollState
@@ -101,6 +103,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -112,6 +115,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.core.view.WindowInsetsControllerCompat
 import com.didi.dimina.Dimina
 import com.didi.dimina.common.Utils
@@ -235,6 +239,12 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
     var permissionTick by remember { mutableIntStateOf(0) }
     var network by remember { mutableStateOf(context.currentNetworkSnapshot()) }
     var started by remember { mutableStateOf(false) }
+    // 长按拖动排序：本地持久化的顺序 + 当前拖拽中的卡片状态。
+    var appOrder by remember { mutableStateOf(HostAppOrder.load(context)) }
+    var draggingId by remember { mutableStateOf<String?>(null) }
+    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    var suppressTapUntil by remember { mutableStateOf(0L) }
+    val gridState = rememberLazyGridState()
 
     fun refresh() {
         apps = HostAppRepository.load(context)
@@ -328,7 +338,9 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { permissionTick++ }
 
-    val hub = remember(apps, catalog.remoteApps) { buildHub(apps, catalog.remoteApps) }
+    val hub = remember(apps, catalog.remoteApps, appOrder) {
+        HostAppOrder.sorted(buildHub(apps, catalog.remoteApps), appOrder)
+    }
     val updates = remember(hub) { hub.filter { it.hasUpdate } }
     val installable = remember(hub) { hub.filter { it.needsInstall } }
     val recentHub = remember(hub, recentIds) {
@@ -349,6 +361,25 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
             }
         }
     }
+
+    /**
+     * 长按拖动排序：把 dragging 移到 over 的位置并持久化。
+     * 顺序里还没有的（新装 / 新上架）先用当前展示顺序播种。
+     */
+    fun moveApp(dragging: String, over: String) {
+        val base = if (appOrder.isEmpty() || dragging !in appOrder || over !in appOrder) {
+            hub.map { it.appId }
+        } else {
+            appOrder
+        }
+        val from = base.indexOf(dragging)
+        val to = base.indexOf(over)
+        if (from < 0 || to < 0 || from == to) return
+        val updated = base.toMutableList().apply { add(to, removeAt(from)) }
+        appOrder = updated
+        HostAppOrder.save(context, updated)
+    }
+
     val permissionStates = remember(permissionTick, showSettings) {
         HostPermissions.items.associateWith { HostPermissions.isGranted(context, it) }
     }
@@ -402,6 +433,7 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
     fun uninstall(app: HostApp, clearData: Boolean) {
         HostAppRepository.uninstall(app.appId, clearData) { result ->
             result.onSuccess {
+                HostInstallOrigin.remove(context, app.appId)
                 refresh()
                 showMessage(if (clearData) "已卸载并清除数据 ${app.name}" else "已卸载 ${app.name}")
             }.onFailure {
@@ -475,6 +507,7 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
 
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(if (catalog.config.listLayout) 1 else 3),
+                    state = gridState,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(top = 4.dp)
@@ -520,29 +553,99 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                         }
                     } else {
                         val onActivate = { item: HostHubItem ->
-                            if (item.canOpen && !item.hasUpdate && item.local != null) {
+                            if (System.currentTimeMillis() < suppressTapUntil) {
+                                Unit
+                            } else if (item.canOpen && !item.hasUpdate && item.local != null) {
                                 openApp(item.local)
                             } else {
                                 selectedItem = item
                             }
                         }
                         gridItems(visible, key = { it.appId }) { item ->
-                            if (catalog.config.listLayout) {
-                                AppListRow(
-                                    item = item,
-                                    bitmap = catalog.icons[item.appId],
-                                    transfer = catalog.transfers[item.appId],
-                                    onOpen = { onActivate(item) },
-                                    onDetails = { selectedItem = item },
-                                )
-                            } else {
-                                AppGridCard(
-                                    item = item,
-                                    bitmap = catalog.icons[item.appId],
-                                    transfer = catalog.transfers[item.appId],
-                                    onOpen = { onActivate(item) },
-                                    onDetails = { selectedItem = item },
-                                )
+                            val isDragging = draggingId == item.appId
+                            Box(
+                                modifier = Modifier
+                                    .zIndex(if (isDragging) 1f else 0f)
+                                    .graphicsLayer {
+                                        if (isDragging) {
+                                            translationX = dragOffset.x
+                                            translationY = dragOffset.y
+                                            alpha = 0.94f
+                                        }
+                                    }
+                                    .pointerInput(item.appId) {
+                                        var travelled = 0f
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = {
+                                                focusManager.clearFocus()
+                                                draggingId = item.appId
+                                                dragOffset = Offset.Zero
+                                                travelled = 0f
+                                                // 长按已经算「排序 / 详情」，压掉随后可能补发的点击
+                                                suppressTapUntil = System.currentTimeMillis() + 5_000
+                                            },
+                                            onDrag = { change, amount ->
+                                                change.consume()
+                                                dragOffset += amount
+                                                travelled += amount.getDistance()
+
+                                                val info = gridState.layoutInfo.visibleItemsInfo
+                                                    .firstOrNull { it.key == item.appId }
+                                                val target = if (info == null) {
+                                                    null
+                                                } else {
+                                                    val center = Offset(
+                                                        info.offset.x + info.size.width / 2f + dragOffset.x,
+                                                        info.offset.y + info.size.height / 2f + dragOffset.y,
+                                                    )
+                                                    gridState.layoutInfo.visibleItemsInfo.firstOrNull { other ->
+                                                        other.key is String &&
+                                                            other.key != item.appId &&
+                                                            center.x >= other.offset.x &&
+                                                            center.x <= other.offset.x + other.size.width &&
+                                                            center.y >= other.offset.y &&
+                                                            center.y <= other.offset.y + other.size.height
+                                                    }?.also {
+                                                        // 换位后删掉位移差，卡片保持贴手
+                                                        dragOffset -= Offset(
+                                                            it.offset.x - info.offset.x,
+                                                            it.offset.y - info.offset.y,
+                                                        )
+                                                    }
+                                                }
+                                                val targetId = target?.key as? String
+                                                if (targetId != null) moveApp(item.appId, targetId)
+                                            },
+                                            onDragEnd = {
+                                                // 长按后没挪动就是「查看详情」，拖动过则已排序
+                                                if (travelled <= 8f) selectedItem = item
+                                                draggingId = null
+                                                dragOffset = Offset.Zero
+                                                suppressTapUntil = System.currentTimeMillis() + 350
+                                            },
+                                            onDragCancel = {
+                                                draggingId = null
+                                                dragOffset = Offset.Zero
+                                                suppressTapUntil = System.currentTimeMillis() + 350
+                                            },
+                                        )
+                                    },
+                            ) {
+                                if (catalog.config.listLayout) {
+                                    AppListRow(
+                                        item = item,
+                                        bitmap = catalog.icons[item.appId],
+                                        transfer = catalog.transfers[item.appId],
+                                        onOpen = { onActivate(item) },
+                                    )
+                                } else {
+                                    AppGridCard(
+                                        item = item,
+                                        bitmap = catalog.icons[item.appId],
+                                        transfer = catalog.transfers[item.appId],
+                                        onOpen = { onActivate(item) },
+                                    )
+                                }
                             }
                         }
                     }
@@ -647,6 +750,7 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                     HostAppRepository.install(context, pkg) { result ->
                         importing = false
                         result.onSuccess {
+                            HostInstallOrigin.record(context, pkg.appId, local = true)
                             refresh()
                             showMessage("已导入 ${pkg.name}")
                         }.onFailure {
@@ -983,14 +1087,13 @@ private fun AppGridCard(
     bitmap: Bitmap?,
     transfer: HostTransferState?,
     onOpen: () -> Unit,
-    onDetails: () -> Unit,
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .height(116.dp)
             .clip(RoundedCornerShape(22.dp))
-            .combinedClickable(onClick = onOpen, onLongClick = onDetails),
+            .clickable(onClick = onOpen),
         color = HostSurface,
         shape = RoundedCornerShape(22.dp),
         shadowElevation = 1.dp,
@@ -1038,14 +1141,13 @@ private fun AppListRow(
     bitmap: Bitmap?,
     transfer: HostTransferState?,
     onOpen: () -> Unit,
-    onDetails: () -> Unit,
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .height(72.dp)
             .clip(RoundedCornerShape(22.dp))
-            .combinedClickable(onClick = onOpen, onLongClick = onDetails),
+            .clickable(onClick = onOpen),
         color = HostSurface,
         shape = RoundedCornerShape(22.dp),
         shadowElevation = 1.dp,
@@ -1100,7 +1202,8 @@ private fun StatusBadge(item: HostHubItem, transfer: HostTransferState?) {
         )
         item.hasUpdate -> Badge("可更新", Color.White, HostPrimary)
         item.isRemoteOnly -> Badge("未安装", HostMuted, HostBg)
-        item.installed && !item.bundled -> Badge("导入", HostPrimary, HostPrimarySoft)
+        // 只有用户自己从本地 ZIP 导入的包才标「导入」，云端下载的不标。
+        item.local?.importedLocally == true -> Badge("导入", HostPrimary, HostPrimarySoft)
     }
 }
 

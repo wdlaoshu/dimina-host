@@ -24,13 +24,14 @@ struct HostApp: Identifiable, Hashable {
     let updateManifestUrl: String
     let bundled: Bool
     let installed: Bool
+    /// 是否是用户从本地 ZIP 导入的；从远程目录下载的为 false。
+    let importedLocally: Bool
 
     var id: String { appId }
 
     var sourceLabel: String {
-        if installed && bundled { return "已安装" }
-        if installed { return "已导入" }
-        return "内置"
+        if bundled { return installed ? "内置 · 已安装" : "内置" }
+        return importedLocally ? "本地导入" : "远程下载"
     }
 
     var canUpdate: Bool { !updateManifestUrl.isEmpty }
@@ -47,7 +48,8 @@ struct HostApp: Identifiable, Hashable {
         versionName: String,
         updateManifestUrl: String,
         bundled: Bool,
-        installed: Bool
+        installed: Bool,
+        importedLocally: Bool = false
     ) {
         self.appId = appId
         self.name = name
@@ -57,6 +59,7 @@ struct HostApp: Identifiable, Hashable {
         self.updateManifestUrl = updateManifestUrl
         self.bundled = bundled
         self.installed = installed
+        self.importedLocally = importedLocally
     }
 
     init(config: DMPAppConfig, bundled: Bool, installed: Bool) {
@@ -81,8 +84,35 @@ struct HostApp: Identifiable, Hashable {
             versionName: versionName,
             updateManifestUrl: updateManifestUrl,
             bundled: value,
-            installed: installed
+            installed: installed,
+            importedLocally: importedLocally
         )
+    }
+}
+
+/// 记录小程序的安装来源：本地 ZIP 导入 / 远程目录下载。
+/// 首页角标只给本地导入的包打「导入」，云端下载的不再误标。
+enum HostInstallOrigin {
+    private static let key = "dimina.host.appOrigins"
+
+    static func isLocal(_ appId: String) -> Bool {
+        origins()[appId] == "local"
+    }
+
+    static func record(_ appId: String, local: Bool) {
+        var map = origins()
+        map[appId] = local ? "local" : "remote"
+        UserDefaults.standard.set(map, forKey: key)
+    }
+
+    static func remove(_ appId: String) {
+        var map = origins()
+        guard map.removeValue(forKey: appId) != nil else { return }
+        UserDefaults.standard.set(map, forKey: key)
+    }
+
+    private static func origins() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
     }
 }
 
@@ -156,12 +186,14 @@ final class HostStore: ObservableObject {
             appId: package.appId,
             packagePath: package.fileURL.path
         )
+        HostInstallOrigin.record(package.appId, local: true)
         try? FileManager.default.removeItem(at: package.fileURL)
         reload()
     }
 
     func uninstall(_ app: HostApp) async throws {
         try await DMPAppManager.sharedInstance().uninstallMiniProgram(appId: app.appId)
+        HostInstallOrigin.remove(app.appId)
         reload()
     }
 
@@ -290,7 +322,8 @@ final class HostStore: ObservableObject {
                 versionName: json["versionName"] as? String ?? "1.0.0",
                 updateManifestUrl: json["updateManifestUrl"] as? String ?? "",
                 bundled: false,
-                installed: true
+                installed: true,
+                importedLocally: HostInstallOrigin.isLocal(folder)
             )
         }
     }

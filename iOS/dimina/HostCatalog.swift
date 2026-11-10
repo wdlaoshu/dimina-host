@@ -668,6 +668,7 @@ final class HostCatalogCenter: ObservableObject {
                 appId: remote.appId,
                 packagePath: destination.path
             )
+            HostInstallOrigin.record(remote.appId, local: false)
             try? FileManager.default.removeItem(at: destination)
             transfers[remote.appId] = nil
         } catch {

@@ -564,6 +564,7 @@ class HostCatalogController(
             if (result.isFailure) {
                 throw result.exceptionOrNull() ?: IOException("安装失败")
             }
+            HostInstallOrigin.record(context, remote.appId, local = false)
             transfers = transfers - remote.appId
             Result.success(Unit)
         } catch (error: Exception) {

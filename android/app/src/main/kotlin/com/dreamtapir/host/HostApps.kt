@@ -26,12 +26,14 @@ data class HostApp(
     val updateManifestUrl: String,
     val bundled: Boolean,
     val installed: Boolean,
+    /** 用户从本地 ZIP 导入的包；从远程目录下载的为 false。 */
+    val importedLocally: Boolean = false,
 ) {
     val sourceLabel: String
         get() = when {
-            installed && bundled -> "已安装"
-            installed -> "已导入"
-            else -> "内置"
+            bundled -> if (installed) "内置 · 已安装" else "内置"
+            importedLocally -> "本地导入"
+            else -> "远程下载"
         }
 
     val canUpdate: Boolean
@@ -102,11 +104,19 @@ object HostAppRepository {
             if (!File(dir, "main/app-config.json").isFile || !File(dir, "main/logic.js").isFile) {
                 return@mapNotNull null
             }
-            json.toHostApp(bundled = false, installed = true)
+            json.toHostApp(
+                bundled = false,
+                installed = true,
+                importedLocally = HostInstallOrigin.isLocal(context, dir.name),
+            )
         }
     }
 
-    private fun JSONObject.toHostApp(bundled: Boolean, installed: Boolean): HostApp? {
+    private fun JSONObject.toHostApp(
+        bundled: Boolean,
+        installed: Boolean,
+        importedLocally: Boolean = false,
+    ): HostApp? {
         val appId = optString("appId").trim()
         if (appId.isEmpty() || appId.contains('/') || appId.contains('\\')) return null
         return HostApp(
@@ -118,6 +128,7 @@ object HostAppRepository {
             updateManifestUrl = optString("updateManifestUrl"),
             bundled = bundled,
             installed = installed,
+            importedLocally = importedLocally,
         )
     }
 
@@ -226,6 +237,64 @@ object RecentApps {
             .putString(KEY, updated.joinToString("|"))
             .apply()
         return updated
+    }
+}
+
+/** 记录安装来源：本地 ZIP 导入 / 远程目录下载，首页角标据此区分。 */
+object HostInstallOrigin {
+    private const val PREFS = "dimina_host_shell"
+    private const val KEY = "local_import_ids"
+
+    fun isLocal(context: Context, appId: String): Boolean = ids(context).contains(appId)
+
+    fun record(context: Context, appId: String, local: Boolean) {
+        val updated = ids(context).toMutableSet()
+        if (local) updated.add(appId) else updated.remove(appId)
+        save(context, updated)
+    }
+
+    fun remove(context: Context, appId: String) {
+        val updated = ids(context).toMutableSet()
+        if (updated.remove(appId)) save(context, updated)
+    }
+
+    private fun ids(context: Context): Set<String> =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getStringSet(KEY, emptySet()).orEmpty().toSet()
+
+    private fun save(context: Context, ids: Set<String>) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putStringSet(KEY, ids)
+            .apply()
+    }
+}
+
+/** 首页长按拖动排好的应用顺序（appId 列表）。 */
+object HostAppOrder {
+    private const val PREFS = "dimina_host_shell"
+    private const val KEY = "app_order"
+
+    fun load(context: Context): List<String> = context
+        .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .getString(KEY, "").orEmpty()
+        .split('|')
+        .filter { it.isNotBlank() }
+
+    fun save(context: Context, ids: List<String>) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY, ids.joinToString("|"))
+            .apply()
+    }
+
+    fun sorted(items: List<HostHubItem>, order: List<String>): List<HostHubItem> {
+        if (order.isEmpty()) return items
+        val index = order.withIndex().associate { (position, id) -> id to position }
+        return items.sortedWith(
+            compareBy<HostHubItem> { index[it.appId] ?: Int.MAX_VALUE }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name },
+        )
     }
 }
 
