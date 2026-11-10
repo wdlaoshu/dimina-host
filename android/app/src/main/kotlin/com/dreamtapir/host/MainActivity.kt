@@ -431,6 +431,16 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
             .take(6)
     }
 
+    /// 单卡关闭：只销毁该实例，用户数据保留；失败给提示。
+    fun closeOneRunning(item: HostHubItem) {
+        runCatching { Dimina.getInstance().closeMiniProgram(item.appId) }
+            .onSuccess {
+                refreshRunning()
+                showMessage("已关闭 ${item.name}")
+            }
+            .onFailure { showMessage("关闭失败：${it.message ?: "未知错误"}") }
+    }
+
     fun closeAllRunning() {
         runCatching { Dimina.getInstance().destroyAllMiniPrograms() }
             .onSuccess {
@@ -905,6 +915,7 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                         }
                     }
                 },
+                onCloseOne = { item -> closeOneRunning(item) },
                 onCloseAll = {
                     showSwitcher = false
                     showCloseAllConfirm = true
@@ -1418,6 +1429,7 @@ private fun SwitcherSheet(
     now: Long,
     usedAt: (String) -> Long,
     onOpen: (HostHubItem) -> Unit,
+    onCloseOne: (HostHubItem) -> Unit,
     onCloseAll: () -> Unit,
 ) {
     Column(
@@ -1447,7 +1459,12 @@ private fun SwitcherSheet(
         if (running.isEmpty()) {
             Text("当前没有运行中的小程序", color = HostMuted, fontSize = 13.sp)
         } else {
-            SwitcherGrid(running, icons, now, usedAt, isRunning = true, onOpen = onOpen)
+            SwitcherGrid(
+                running, icons, now, usedAt,
+                isRunning = true,
+                onOpen = onOpen,
+                onCloseOne = onCloseOne,
+            )
         }
 
         if (recycled.isNotEmpty()) {
@@ -1459,7 +1476,12 @@ private fun SwitcherSheet(
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(10.dp))
-            SwitcherGrid(recycled, icons, now, usedAt, isRunning = false, onOpen = onOpen)
+            SwitcherGrid(
+                recycled, icons, now, usedAt,
+                isRunning = false,
+                onOpen = onOpen,
+                onCloseOne = null,
+            )
         }
 
         if (running.isNotEmpty()) {
@@ -1492,6 +1514,7 @@ private fun SwitcherGrid(
     usedAt: (String) -> Long,
     isRunning: Boolean,
     onOpen: (HostHubItem) -> Unit,
+    onCloseOne: ((HostHubItem) -> Unit)?,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         items.chunked(2).forEach { row ->
@@ -1507,6 +1530,7 @@ private fun SwitcherGrid(
                         },
                         isRunning = isRunning,
                         onClick = { onOpen(item) },
+                        onClose = onCloseOne?.let { close -> { close(item) } },
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -1523,6 +1547,7 @@ private fun SwitcherCard(
     timeText: String,
     isRunning: Boolean,
     onClick: () -> Unit,
+    onClose: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -1536,16 +1561,35 @@ private fun SwitcherCard(
         Row(verticalAlignment = Alignment.Top) {
             AppIcon(name = item.name, bitmap = bitmap, size = 42, corner = 13, fontSize = 17)
             Spacer(Modifier.weight(1f))
-            Text(
-                text = if (isRunning) "运行中" else "已回收",
-                color = if (isRunning) HostGreen else HostMuted,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(if (isRunning) HostGreen.copy(alpha = 0.12f) else HostBg)
-                    .padding(horizontal = 7.dp, vertical = 3.dp),
-            )
+            if (onClose != null) {
+                // 单卡关闭按钮：嵌在卡片点击区里，需要独立可点区域。
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(HostBg)
+                        .clickable(onClick = onClose),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "关闭 ${item.name}",
+                        tint = HostMuted,
+                        modifier = Modifier.size(12.dp),
+                    )
+                }
+            } else {
+                Text(
+                    text = "已回收",
+                    color = HostMuted,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(HostBg)
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                )
+            }
         }
         Spacer(Modifier.height(8.dp))
         Text(

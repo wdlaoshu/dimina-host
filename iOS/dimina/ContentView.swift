@@ -601,6 +601,9 @@ struct ContentView: View {
                     }
                 }
             },
+            onCloseOne: { item in
+                closeOneRunning(item)
+            },
             onCloseAll: {
                 showSwitcher = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
@@ -621,6 +624,19 @@ struct ContentView: View {
             } catch {
                 refreshRunning()
                 open(app)
+            }
+        }
+    }
+
+    /// 单卡关闭：只销毁该实例，页面栈与用户数据策略同 destroyAll。
+    private func closeOneRunning(_ item: HostHubItem) {
+        Task { @MainActor in
+            do {
+                try await DMPAppManager.sharedInstance().closeMiniProgram(appId: item.appId)
+                refreshRunning()
+                showToast("已关闭 \(item.name)")
+            } catch {
+                showToast("关闭失败：\(error.localizedDescription)", kind: .error)
             }
         }
     }
@@ -2474,6 +2490,7 @@ private struct HostSwitcherSheet: View {
     let icons: [String: UIImage]
     let times: [String: TimeInterval]
     let onOpen: (HostHubItem) -> Void
+    let onCloseOne: (HostHubItem) -> Void
     let onCloseAll: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -2594,13 +2611,28 @@ private struct HostSwitcherSheet: View {
             HStack(alignment: .top) {
                 icon(item, size: 42)
                 Spacer(minLength: 4)
-                Text(running ? "运行中" : "已回收")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(running ? HostTheme.green : HostTheme.muted)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(running ? HostTheme.green.opacity(0.12) : HostTheme.bg)
-                    .clipShape(Capsule())
+                if running {
+                    // 单卡关闭按钮：嵌在卡片点击区里，得用独立小按钮避免触发整卡点击。
+                    Button {
+                        onCloseOne(item)
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(HostTheme.muted)
+                            .frame(width: 26, height: 26)
+                            .background(HostTheme.bg)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text("已回收")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(HostTheme.muted)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(HostTheme.bg)
+                        .clipShape(Capsule())
+                }
             }
             Text(item.name)
                 .font(.system(size: 13, weight: .semibold))

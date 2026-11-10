@@ -366,6 +366,20 @@ public class DMPAppManager {
         }
     }
 
+    /// 关闭指定 appId 的实例：后台保留实例直接销毁，前台实例走正常关闭并恢复调用方。
+    /// 宿主实例切换器的单卡关闭用；找不到实例时抛 sourceUnavailable。
+    @MainActor
+    public func closeMiniProgram(appId rawAppId: String) async throws {
+        let appId = rawAppId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !appId.isEmpty else {
+            throw DMPMiniProgramNavigationError.invalidAppId
+        }
+        guard let app = existApp(appId: appId) else {
+            throw DMPMiniProgramNavigationError.sourceUnavailable
+        }
+        try await exitMiniProgram(app, onAccepted: {})
+    }
+
     /// 切到另一个已保留的实例：先把当前实例隐藏（页面栈和 WebView 原样保留），
     /// 再让目标实例把保留的控制器挂回共享的 navigationController。
     /// 两侧都不重启运行时；失败时把当前实例恢复回前台，避免把用户丢在宿主首页。
