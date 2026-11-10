@@ -93,6 +93,17 @@ final class DMPTabBarContainerController: UIViewController {
         applyStatusBarStyleForCurrentTab()
     }
 
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // 离开小程序后把整窗外观还给宿主
+        let stack = navigationController?.viewControllers ?? []
+        let stillInside = stack.contains {
+            $0 is DMPPageController || $0 is DMPTabBarContainerController
+        }
+        guard !stillInside else { return }
+        DMPUIManager.notifyMiniProgramInterfaceStyle(.unspecified)
+    }
+
     /// 当前 tab 页希望的状态栏样式；nil 表示沿用系统/宿主的判断
     private var statusBarStyleOverride: UIStatusBarStyle?
 
@@ -122,6 +133,8 @@ final class DMPTabBarContainerController: UIViewController {
         }
         setNeedsStatusBarAppearanceUpdate()
         navigationController?.setNeedsStatusBarAppearanceUpdate()
+        // SwiftUI 根 hosting controller 才是状态栏的真正决策者，广播给宿主去应用
+        DMPUIManager.notifyMiniProgramInterfaceStyle(style)
     }
 
     override func viewSafeAreaInsetsDidChange() {

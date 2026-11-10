@@ -14,12 +14,40 @@ struct diminaApp: App {
     // updateUIViewController；在这里持有时，改动会重建 HostRootView 并同步 preferredColorScheme。
     @AppStorage(HostThemeMode.storageKey) private var themeMode = HostThemeMode.system.rawValue
 
+    // 小程序页面在栈顶时，整窗外观要跟着小程序自身深浅走（微信同款）：
+    // 宿主是深色、小程序是浅色时，状态栏区域和图标才是小程序自己的浅色。
+    // 回到宿主后框架会广播 .unspecified，这里自动回落到宿主的主题设置。
+    @State private var miniProgramStyle: UIUserInterfaceStyle = .unspecified
+
     var body: some Scene {
         WindowGroup {
             // 根容器铺满整屏，避免状态栏与 Home Indicator 区域露出白色背景
             HostRootView(themeMode: themeMode)
                 .ignoresSafeArea()
-                .preferredColorScheme(HostThemeMode(rawValue: themeMode)?.colorScheme)
+                .preferredColorScheme(preferredScheme)
+                .onReceive(
+                    NotificationCenter.default.publisher(for: .dmpMiniProgramInterfaceStyleDidChange)
+                ) { note in
+                    if let raw = note.userInfo?["style"] as? Int,
+                        let style = UIUserInterfaceStyle(rawValue: raw)
+                    {
+                        miniProgramStyle = style
+                    } else {
+                        miniProgramStyle = .unspecified
+                    }
+                }
+        }
+    }
+
+    /// 小程序在栈顶时用小程序自己的深浅；否则用宿主设置的三档主题
+    private var preferredScheme: ColorScheme? {
+        switch miniProgramStyle {
+        case .light:
+            return .light
+        case .dark:
+            return .dark
+        default:
+            return HostThemeMode(rawValue: themeMode)?.colorScheme
         }
     }
 }

@@ -538,6 +538,19 @@ public class DMPPageController: UIViewController {
         navigationController?.setNeedsStatusBarAppearanceUpdate()
         // 胶囊挂在导航控制器视图上，跟着小程序自身深浅走，避免深色胶囊压在浅色导航栏上
         navigator?.setCapsuleInterfaceStyle(style)
+        // SwiftUI 根 hosting controller 才是状态栏的真正决策者，广播给宿主去应用
+        DMPUIManager.notifyMiniProgramInterfaceStyle(style)
+    }
+
+    /// 离开小程序（被 pop / 隐藏 / 关闭）时把整窗外观还给宿主，
+    /// 否则宿主会停留在小程序最后使用的浅色或深色。
+    private func notifyHostStyleIfLeavingMiniProgram() {
+        let stack = navigationController?.viewControllers ?? []
+        let stillInside = stack.contains {
+            $0 is DMPPageController || $0 is DMPTabBarContainerController
+        }
+        guard !stillInside else { return }
+        DMPUIManager.notifyMiniProgramInterfaceStyle(.unspecified)
     }
 
     private func updateCustomBackButton(darkStyle: Bool) {
@@ -1374,6 +1387,8 @@ public class DMPPageController: UIViewController {
             // Page is removed from navigation stack
             destroyWebView()
         }
+
+        notifyHostStyleIfLeavingMiniProgram()
     }
     
     // Destroy WebView

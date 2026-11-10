@@ -38,6 +38,9 @@ public class DMPNavigator: NSObject {
     // 胶囊属于小程序容器，而不是某个页面。固定挂在 UINavigationController.view
     // 上可避免 push/pop 时新旧页面各携带一份胶囊参与转场。
     private var capsuleView: UIView?
+    /// 胶囊应当跟随的小程序深浅；胶囊可能晚于页面创建，先记下来等安装完再应用
+    private var capsuleInterfaceStyle: UIUserInterfaceStyle = .unspecified
+    /// 胶囊图标是用颜色渲染成 UIImage 的，trait 变化不会自动重绘，需要持有后手动重画
     private weak var capsuleMoreButton: UIButton?
     private weak var capsuleCloseButton: UIButton?
 
@@ -111,7 +114,19 @@ public class DMPNavigator: NSObject {
     /// 宿主深浅与小程序不一致时（宿主深色 + 小程序浅色），胶囊会变成深底压在浅色导航栏上，
     /// 由页面显式把胶囊切到小程序自身的深浅。
     func setCapsuleInterfaceStyle(_ style: UIUserInterfaceStyle) {
-        capsuleView?.overrideUserInterfaceStyle = style
+        capsuleInterfaceStyle = style
+        guard let capsuleView, capsuleView.overrideUserInterfaceStyle != style else { return }
+        capsuleView.overrideUserInterfaceStyle = style
+        // 图标是用颜色烘焙成 UIImage 的，trait 变化不会自动重绘；
+        // 不重画就会停在旧颜色上（典型表现：白底白图标，看起来胶囊里什么都没有）。
+        let iconColor: UIColor = style == .dark
+            ? .white
+            : DMPAppManager.sharedInstance().capsuleIconColor
+        capsuleMoreButton?.setImage(makeCapsuleMoreImage(color: iconColor), for: .normal)
+        capsuleCloseButton?.setImage(makeCapsuleCloseImage(color: iconColor), for: .normal)
+        capsuleView.layer.borderColor = style == .dark
+            ? UIColor(red: 0.2, green: 0.22, blue: 0.28, alpha: 1).cgColor
+            : UIColor(red: 229 / 255, green: 229 / 255, blue: 229 / 255, alpha: 1).cgColor
     }
 
     func setCapsuleEnabled(_ enabled: Bool) {
@@ -225,6 +240,11 @@ public class DMPNavigator: NSObject {
         self.capsuleView = capsuleView
         self.capsuleMoreButton = moreButton
         self.capsuleCloseButton = closeButton
+        // 页面可能先于胶囊应用过深浅，安装完立即补一次，保证图标不是旧颜色
+        if capsuleInterfaceStyle != .unspecified {
+            capsuleView.overrideUserInterfaceStyle = .unspecified
+            setCapsuleInterfaceStyle(capsuleInterfaceStyle)
+        }
     }
 
     private func makeCapsuleMoreImage(color: UIColor) -> UIImage {

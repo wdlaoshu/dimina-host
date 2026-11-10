@@ -110,6 +110,23 @@ public class DMPUIManager {
         // 宿主外观会被最后打开的小程序的 darkStyle 劫持。
     }
 
+    /// 小程序页面在栈顶时，希望整窗切换到的外观；回到宿主时用 .unspecified 复原。
+    /// SwiftUI 的根 hosting controller 才是状态栏的实际决策者（representable 里的
+    /// 导航控制器不是 window 根，preferredStatusBarStyle 不会被询问），
+    /// 所以外观必须由宿主通过 preferredColorScheme 应用，框架只负责广播目标值。
+    public static func notifyMiniProgramInterfaceStyle(_ style: UIUserInterfaceStyle) {
+        NotificationCenter.default.post(
+            name: .dmpMiniProgramInterfaceStyleDidChange,
+            object: nil,
+            userInfo: ["style": style.rawValue]
+        )
+    }
+}
+
+public extension Notification.Name {
+    static let dmpMiniProgramInterfaceStyleDidChange = Notification.Name(
+        "DMPMiniProgramInterfaceStyleDidChange"
+    )
 }
 
 /// 宿主根导航控制器。
