@@ -603,33 +603,38 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                                     )
                                     // 被拖起来的这张先藏起来，跟手的是上面的浮层，原位不留残影。
                                     .graphicsLayer { alpha = if (isDragging) 0f else 1f }
-                                    .pointerInput(item.appId) {
+                                    .pointerInput(item.appId, filter == HostFilter.Recent) {
                                         var travelled = 0f
+                                        var reorderable = false
                                         detectDragGesturesAfterLongPress(
                                             onDragStart = {
-                                                focusManager.clearFocus()
-                                                draggingId = item.appId
                                                 dragOffset = Offset.Zero
                                                 travelled = 0f
-                                                val cards = gridState.layoutInfo.visibleItemsInfo
-                                                    .filter { it.key is String }
-                                                val info = cards.firstOrNull { it.key == item.appId }
-                                                if (info != null) {
-                                                    dragPreviewOrigin = Offset(
-                                                        info.offset.x.toFloat(),
-                                                        info.offset.y.toFloat(),
-                                                    )
-                                                    dragPreviewSize = info.size
-                                                }
-                                                // 记录按下时的格子位置：之后布局在动，判断依据不能跟着动，
-                                                // 否则两张卡片会互相抢位、来回抖。
-                                                dragSlots = cards.map {
-                                                    Rect(
-                                                        left = it.offset.x.toFloat(),
-                                                        top = it.offset.y.toFloat(),
-                                                        right = (it.offset.x + it.size.width).toFloat(),
-                                                        bottom = (it.offset.y + it.size.height).toFloat(),
-                                                    )
+                                                // 最近使用是按使用时间自动排的，不参与手动排序。
+                                                reorderable = filter != HostFilter.Recent
+                                                if (reorderable) {
+                                                    focusManager.clearFocus()
+                                                    draggingId = item.appId
+                                                    val cards = gridState.layoutInfo.visibleItemsInfo
+                                                        .filter { it.key is String }
+                                                    val info = cards.firstOrNull { it.key == item.appId }
+                                                    if (info != null) {
+                                                        dragPreviewOrigin = Offset(
+                                                            info.offset.x.toFloat(),
+                                                            info.offset.y.toFloat(),
+                                                        )
+                                                        dragPreviewSize = info.size
+                                                    }
+                                                    // 记录按下时的格子位置：之后布局在动，判断依据不能跟着动，
+                                                    // 否则两张卡片会互相抢位、来回抖。
+                                                    dragSlots = cards.map {
+                                                        Rect(
+                                                            left = it.offset.x.toFloat(),
+                                                            top = it.offset.y.toFloat(),
+                                                            right = (it.offset.x + it.size.width).toFloat(),
+                                                            bottom = (it.offset.y + it.size.height).toFloat(),
+                                                        )
+                                                    }
                                                 }
                                                 // 长按已经算「排序 / 详情」，压掉随后可能补发的点击
                                                 suppressTapUntil = System.currentTimeMillis() + 5_000
@@ -641,7 +646,7 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
 
                                                 val w = dragPreviewSize.width
                                                 val h = dragPreviewSize.height
-                                                if (w > 0 && h > 0) {
+                                                if (reorderable && w > 0 && h > 0) {
                                                     val center = Offset(
                                                         dragPreviewOrigin.x + dragOffset.x + w / 2f,
                                                         dragPreviewOrigin.y + dragOffset.y + h / 2f,

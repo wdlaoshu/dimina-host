@@ -561,6 +561,8 @@ struct ContentView: View {
                 .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("host-content")))
                 .onChanged { value in
                     guard case let .second(true, drag?) = value else { return }
+                    // 最近使用是按使用时间自动排的，不参与手动排序。
+                    guard filter != .recent else { return }
                     if draggingId == nil {
                         dragFrames = cardFrames
                         dragSlots = visibleItems.compactMap { cardFrames[$0.appId] }
@@ -583,7 +585,16 @@ struct ContentView: View {
                     }
                 }
                 .onEnded { value in
-                    guard draggingId == item.appId else { return }
+                    guard draggingId == item.appId else {
+                        // 最近使用里长按不动，仍然可以看详情。
+                        if filter == .recent,
+                           case let .second(true, drag?) = value,
+                           abs(drag.translation.width) <= 6,
+                           abs(drag.translation.height) <= 6 {
+                            selectedItem = item
+                        }
+                        return
+                    }
                     var moved = false
                     if case let .second(true, drag?) = value {
                         moved = abs(drag.translation.width) > 6 || abs(drag.translation.height) > 6
@@ -662,6 +673,8 @@ struct ContentView: View {
                 .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("host-content")))
                 .onChanged { value in
                     guard case let .second(true, drag?) = value else { return }
+                    // 最近使用是按使用时间自动排的，不参与手动排序。
+                    guard filter != .recent else { return }
                     if draggingId == nil {
                         dragFrames = cardFrames
                         dragSlots = visibleItems.compactMap { cardFrames[$0.appId] }
@@ -684,7 +697,16 @@ struct ContentView: View {
                     }
                 }
                 .onEnded { value in
-                    guard draggingId == item.appId else { return }
+                    guard draggingId == item.appId else {
+                        // 最近使用里长按不动，仍然可以看详情。
+                        if filter == .recent,
+                           case let .second(true, drag?) = value,
+                           abs(drag.translation.width) <= 6,
+                           abs(drag.translation.height) <= 6 {
+                            selectedItem = item
+                        }
+                        return
+                    }
                     var moved = false
                     if case let .second(true, drag?) = value {
                         moved = abs(drag.translation.width) > 6 || abs(drag.translation.height) > 6
@@ -1005,9 +1027,10 @@ struct ContentView: View {
         var items: [HostHubItem]
         switch filter {
         case .recent:
-            items = orderedByUser(store.recentIds.compactMap { id in
+            // 最近使用永远按使用时间排，不套用用户拖动出来的顺序。
+            items = store.recentIds.compactMap { id in
                 hubItems.first { $0.appId == id }
-            })
+            }
         case .all:
             items = hubItems
         case .updates:
