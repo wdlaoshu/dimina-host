@@ -516,6 +516,8 @@ struct ContentView: View {
                             appRow(item)
                         }
                     }
+                    // 拖动识别只挂在卡片区，运行中横条 / 刷新提示条仍可下拉刷新。
+                    .simultaneousGesture(cardDragGesture)
                 } else {
                     // 非懒加载网格：首页小程序数量一般是几十个以内，用 Grid 排足够流畅。
                     Grid(horizontalSpacing: 12, verticalSpacing: 12) {
@@ -538,6 +540,7 @@ struct ContentView: View {
                             }
                         }
                     }
+                    .simultaneousGesture(cardDragGesture)
                 }
             }
             .padding(.horizontal, 16)
@@ -548,12 +551,6 @@ struct ContentView: View {
             .overlay(alignment: .topLeading) {
                 dragPreviewLayer
             }
-            // 拖动过程挂在稳定的容器上：卡片换行重建也不会中断手势（这是卡住的根因）。
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .named("host-content"))
-                    .onChanged { updateDrag($0) }
-                    .onEnded { endDrag($0) }
-            )
             .onPreferenceChange(HostCardFrameKey.self) { frames in
                 cardFrames = frames
             }
@@ -963,6 +960,13 @@ struct ContentView: View {
                 beginDrag(item)
             }
         }
+    }
+
+    /// 卡片区统一的拖动识别（容器级，卡片换行重建也不会中断）。
+    private var cardDragGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("host-content"))
+            .onChanged { updateDrag($0) }
+            .onEnded { endDrag($0) }
     }
 
     /// 长按开始拖动：锁定按下瞬间的格子矩形，浮层从卡片中心起跟手。
