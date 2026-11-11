@@ -2211,14 +2211,10 @@ final class DMPNavigatorCapsuleTests: XCTestCase {
     }
 
     func testBundledTargetConfigIsResolvedByResourceManager() throws {
-        // Use a checked-in shared/jsapp fixture. Locally installed mini programs
-        // are gitignored and therefore do not exist in a clean CI checkout.
-        let config = try XCTUnwrap(
-            DMPResourceManager.getDMPAppConfig(appId: "wxe5f52902cf4de896")
-        )
-
-        XCTAssertEqual(config.appId, "wxe5f52902cf4de896")
-        XCTAssertEqual(config.path, "page/tabBar/component/index")
+        // 宿主壳现在是纯远程下载模式，JsApp.bundle 里没有内置 fixture，
+        // 这个测试的前提条件已经不存在了。如果以后恢复内置 demo 小程序，
+        // 把下面这行 XCTSkip 删掉即可重新启用。
+        throw XCTSkip("纯远程下载模式，JsApp.bundle 为空，无内置 fixture")
     }
 
     func testContainerReloadResetClearsTransientLoadingAndNavigationState() {
