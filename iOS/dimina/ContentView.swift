@@ -411,17 +411,9 @@ struct ContentView: View {
         // SwiftUI 嵌套滚动视图会出现手势竞争，导致下拉刷新偶发被内层吃掉。
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                // 刷新提示条：虚线分割线 + 居中胶囊 + 最右刷新按钮
-                // 整个区域无 Drag/LongPress 手势，专门给外层 .refreshable 留的安全区
-                RefreshHintBar(isRefreshing: isRefreshing) {
-                    isRefreshing = true
-                    await sync(force: true)
-                    isRefreshing = false
-                }
-
-                if !runningIds.isEmpty {
-                    runningStrip
-                }
+                // 运行中横条：常驻显示。无运行时展示空状态提示。
+                // 空状态下整行不可点，但 ScrollView 外层 .refreshable 能触达。
+                runningStrip
 
                 if !updatableItems.isEmpty && filter != .updates {
                     updateBar
@@ -540,42 +532,81 @@ struct ContentView: View {
     }
 
     private var runningStrip: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let isEmpty = runningItems.isEmpty
+
+        return VStack(alignment: .leading, spacing: 10) {
+            // Header：运行中状态 / 空状态提示 + 刷新入口
             HStack(spacing: 7) {
-                Circle()
-                    .fill(HostTheme.green)
-                    .frame(width: 6, height: 6)
-                Text("运行中 \(runningItems.count)")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(HostTheme.text)
-                Spacer(minLength: 4)
-                Button {
-                    refreshRunning()
-                    showSwitcher = true
-                } label: {
-                    HStack(spacing: 2) {
-                        Text("全部")
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .bold))
-                    }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(HostTheme.muted)
+                if isEmpty {
+                    // 空状态：灰色圆点 + "当前无程序运行"
+                    Circle()
+                        .fill(HostTheme.muted.opacity(0.4))
+                        .frame(width: 6, height: 6)
+                    Text("当前无程序运行")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(HostTheme.muted)
+                } else {
+                    // 正常状态：绿色圆点 + 数量
+                    Circle()
+                        .fill(HostTheme.green)
+                        .frame(width: 6, height: 6)
+                    Text("运行中 \(runningItems.count)")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(HostTheme.text)
                 }
-                .buttonStyle(.plain)
+
+                Spacer(minLength: 4)
+
+                // "下拉刷新"提示胶囊 —— 和"全部 >" / "刷新"按钮在同一行
+                RefreshCapsule(isRefreshing: isRefreshing) {
+                    isRefreshing = true
+                    Task { await sync(force: true) }
+                    isRefreshing = false
+                }
+
+                if !isEmpty {
+                    Button {
+                        refreshRunning()
+                        showSwitcher = true
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text("全部")
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(HostTheme.muted)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(runningItems) { item in
-                        Button {
-                            activateRunning(item)
-                        } label: {
-                            runningCard(item)
-                        }
-                        .buttonStyle(.plain)
-                    }
+            if isEmpty {
+                // 空状态占位：一行灰色提示文字，保持卡片区域的视觉高度
+                HStack {
+                    Image(systemName: "arrow.down")
+                        .font(.system(size: 10))
+                        .foregroundColor(HostTheme.muted.opacity(0.5))
+                    Text("下拉刷新可同步远程小程序")
+                        .font(.system(size: 11))
+                        .foregroundColor(HostTheme.muted.opacity(0.6))
+                    Spacer()
                 }
-                .padding(.vertical, 1)
+                .padding(.vertical, 6)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(runningItems) { item in
+                            Button {
+                                activateRunning(item)
+                            } label: {
+                                runningCard(item)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 1)
+                }
             }
         }
         .padding(12)
@@ -2773,136 +2804,43 @@ private struct HostAppearanceObserver: UIViewControllerRepresentable {
     }
 }
 
-// MARK: - Refresh Hint Bar
+// MARK: - Refresh Capsule
 
-/// 下拉刷新提示条：虚线分割线 + 居中胶囊 + 最右刷新按钮。
-/// 整个区域**不挂任何 Drag/LongPress 手势**——专门给外层 .refreshable 留的"安全区"。
-///
-/// 虚线不"压"在胶囊底下，而是用 PreferenceKey 让 Path 精确感知胶囊的 frame：
-/// - 左虚线：x=0 → 胶囊左边 - 12px
-/// - 右虚线：胶囊右边 + 12px → 按钮左边 - 38px
-/// 这样虚线在胶囊两边自然断开，视觉上是"分割线被胶囊吃掉"而不是"被背景色盖住"。
-/// 刷新按钮可点击，动画效果和 iOS 原生 refreshable 一致。
-struct RefreshHintBar: View {
+/// 融合在 runningStrip header 里的刷新入口。
+/// 极简胶囊：一个 refresh icon + 文字 + 点击刷新。
+/// 不挂 Drag/LongPress 手势，只响应 Button tap，不干扰外层 .refreshable。
+struct RefreshCapsule: View {
     let isRefreshing: Bool
     let onRefresh: () async -> Void
 
-    // 缓存胶囊在 ZStack 坐标系里的 frame，用来精确计算虚线的起止点
-    @State private var capsuleFrame: CGRect = .zero
-
     var body: some View {
-        ZStack {
-            // 底层：两段虚线 Path，根据 capsuleFrame 精确算起止
-            GeometryReader { geo in
-                let midY = geo.size.height / 2
-                let c = capsuleFrame
-                let gap: CGFloat = 12       // 虚线和胶囊之间的间隙
-                let btnReserve: CGFloat = 38 // 26px 按钮 + 12px 间隙
-
-                Path { path in
-                    // 左虚线：从左边缘 → 胶囊左边 - gap
-                    let leftEnd = c.minX.isFinite && c.minX > 0
-                        ? max(0, c.minX - gap)
-                        : geo.size.width / 2 - 50 // capsuleFrame 还没拿到时的兜底
-                    path.move(to: CGPoint(x: 0, y: midY))
-                    path.addLine(to: CGPoint(x: leftEnd, y: midY))
-
-                    // 右虚线：胶囊右边 + gap → 按钮左边
-                    let rightStart = c.maxX.isFinite && c.maxX > 0
-                        ? min(geo.size.width - btnReserve, c.maxX + gap)
-                        : geo.size.width / 2 + 50 // 兜底
-                    path.move(to: CGPoint(x: rightStart, y: midY))
-                    path.addLine(to: CGPoint(x: geo.size.width - btnReserve, y: midY))
-                }
-                .stroke(
-                    HostTheme.muted.opacity(0.5),
-                    style: StrokeStyle(lineWidth: 1, dash: [4, 4], dashPhase: 0)
-                )
-            }
-
-            // 胶囊：center 定位 + overlay 上报自己的 frame 给虚线 Path
-            capsule
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                .overlay(
-                    GeometryReader { g in
-                        Color.clear.preference(
-                            key: CapsuleFrameKey.self,
-                            value: g.frame(in: .named("HintCoordSpace"))
-                        )
-                    }
-                )
-
-            // 刷新按钮：trailing 定位
-            refreshButton
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-        }
-        .coordinateSpace(name: "HintCoordSpace")
-        .onPreferenceChange(CapsuleFrameKey.self) { frame in
-            // 过滤非法值：首次渲染时 frame 可能是 .zero 或 infinite
-            if frame.width > 0, frame.height > 0, frame.origin.x.isFinite {
-                self.capsuleFrame = frame
-            }
-        }
-        .frame(height: 28)
-    }
-
-    // MARK: - Capsule
-
-    private var capsule: some View {
-        HStack(spacing: 4) {
-            Image(systemName: isRefreshing ? "arrow.2.circlepath" : "arrow.down")
-                .font(.system(size: 10, weight: .medium))
-                .rotationEffect(.degrees(isRefreshing ? 0 : 0))
-            Text(isRefreshing ? "正在同步…" : "下拉刷新")
-                .font(.caption2)
-                .fontWeight(.medium)
-        }
-        .foregroundStyle(HostTheme.muted)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 3)
-        // 这里只加描边，不画 HostTheme.bg —— 因为虚线已经精确断开了，不需要背景色"盖住"
-        .overlay(
-            Capsule()
-                .stroke(HostTheme.muted.opacity(0.25), lineWidth: 1)
-        )
-        // 但胶囊本身需要不透明背景色，这样虚线就真的不会被看到穿过它
-        .background(HostTheme.bg, in: Capsule())
-    }
-
-    // MARK: - Refresh Button
-
-    private var refreshButton: some View {
         Button {
             Task { await onRefresh() }
         } label: {
-            Image(systemName: "arrow.triangle.2.circlepath")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(HostTheme.muted)
-                .frame(width: 26, height: 26)
-                .background(HostTheme.surface, in: Circle())
-                .overlay(
-                    Circle()
-                        .stroke(HostTheme.muted.opacity(0.25), lineWidth: 1)
-                )
-                // 刷新动画：0.8s linear 无限旋转，和 iOS 原生 refreshable 一致
-                .rotationEffect(.degrees(isRefreshing ? 360 : 0))
-                .animation(
-                    isRefreshing
-                        ? .linear(duration: 0.8).repeatForever(autoreverses: false)
-                        : .default,
-                    value: isRefreshing
-                )
+            HStack(spacing: 3) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 10, weight: .medium))
+                    .rotationEffect(.degrees(isRefreshing ? 360 : 0))
+                    .animation(
+                        isRefreshing
+                            ? .linear(duration: 0.8).repeatForever(autoreverses: false)
+                            : .default,
+                        value: isRefreshing
+                    )
+                Text(isRefreshing ? "同步中" : "下拉刷新")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(HostTheme.muted)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(HostTheme.bg, in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(HostTheme.muted.opacity(0.2), lineWidth: 0.5)
+            )
         }
         .buttonStyle(.plain)
-    }
-}
-
-// MARK: - PreferenceKey: 胶囊 frame 上报
-
-private struct CapsuleFrameKey: PreferenceKey {
-    static var defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
+        .disabled(isRefreshing)
     }
 }
 
