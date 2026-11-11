@@ -2775,24 +2775,44 @@ private struct HostAppearanceObserver: UIViewControllerRepresentable {
 
 // MARK: - Refresh Hint Bar
 
-/// 放在 ScrollView 顶部的"下拉刷新"文字提示条。
 /// 下拉刷新提示条：虚线分割线 + 居中胶囊 + 最右刷新按钮。
 /// 整个区域**不挂任何 Drag/LongPress 手势**——专门给外层 .refreshable 留的"安全区"。
-/// 胶囊用 HostTheme.bg（页面背景色）盖住底下的虚线，自然产生视觉间隙。
-/// 刷新按钮可点击，直接调 sync(force:true)，动画效果和 iOS 原生 refreshable 一致。
+///
+/// 虚线不"压"在胶囊底下，而是用 PreferenceKey 让 Path 精确感知胶囊的 frame：
+/// - 左虚线：x=0 → 胶囊左边 - 12px
+/// - 右虚线：胶囊右边 + 12px → 按钮左边 - 38px
+/// 这样虚线在胶囊两边自然断开，视觉上是"分割线被胶囊吃掉"而不是"被背景色盖住"。
+/// 刷新按钮可点击，动画效果和 iOS 原生 refreshable 一致。
 struct RefreshHintBar: View {
     let isRefreshing: Bool
     let onRefresh: () async -> Void
 
+    // 缓存胶囊在 ZStack 坐标系里的 frame，用来精确计算虚线的起止点
+    @State private var capsuleFrame: CGRect = .zero
+
     var body: some View {
         ZStack {
-            // 底层：横跨整行的虚线 Path
-            // 右边预留 38px（26px 按钮 + 12px 间隙），虚线自然停在按钮左边
+            // 底层：两段虚线 Path，根据 capsuleFrame 精确算起止
             GeometryReader { geo in
+                let midY = geo.size.height / 2
+                let c = capsuleFrame
+                let gap: CGFloat = 12       // 虚线和胶囊之间的间隙
+                let btnReserve: CGFloat = 38 // 26px 按钮 + 12px 间隙
+
                 Path { path in
-                    let midY = geo.size.height / 2
-                    path.move(to:    CGPoint(x: 0,             y: midY))
-                    path.addLine(to: CGPoint(x: geo.size.width - 38, y: midY))
+                    // 左虚线：从左边缘 → 胶囊左边 - gap
+                    let leftEnd = c.minX.isFinite && c.minX > 0
+                        ? max(0, c.minX - gap)
+                        : geo.size.width / 2 - 50 // capsuleFrame 还没拿到时的兜底
+                    path.move(to: CGPoint(x: 0, y: midY))
+                    path.addLine(to: CGPoint(x: leftEnd, y: midY))
+
+                    // 右虚线：胶囊右边 + gap → 按钮左边
+                    let rightStart = c.maxX.isFinite && c.maxX > 0
+                        ? min(geo.size.width - btnReserve, c.maxX + gap)
+                        : geo.size.width / 2 + 50 // 兜底
+                    path.move(to: CGPoint(x: rightStart, y: midY))
+                    path.addLine(to: CGPoint(x: geo.size.width - btnReserve, y: midY))
                 }
                 .stroke(
                     HostTheme.muted.opacity(0.5),
@@ -2800,13 +2820,28 @@ struct RefreshHintBar: View {
                 )
             }
 
-            // 胶囊：ZStack 中心定位，背景色盖住底下的虚线 → 自然间隙
+            // 胶囊：center 定位 + overlay 上报自己的 frame 给虚线 Path
             capsule
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .overlay(
+                    GeometryReader { g in
+                        Color.clear.preference(
+                            key: CapsuleFrameKey.self,
+                            value: g.frame(in: .named("HintCoordSpace"))
+                        )
+                    }
+                )
 
-            // 刷新按钮：ZStack 最右端定位
+            // 刷新按钮：trailing 定位
             refreshButton
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        }
+        .coordinateSpace(name: "HintCoordSpace")
+        .onPreferenceChange(CapsuleFrameKey.self) { frame in
+            // 过滤非法值：首次渲染时 frame 可能是 .zero 或 infinite
+            if frame.width > 0, frame.height > 0, frame.origin.x.isFinite {
+                self.capsuleFrame = frame
+            }
         }
         .frame(height: 28)
     }
@@ -2825,12 +2860,13 @@ struct RefreshHintBar: View {
         .foregroundStyle(HostTheme.muted)
         .padding(.horizontal, 10)
         .padding(.vertical, 3)
-        // 关键：背景色 = 页面背景色 → 胶囊"吃掉"底下的虚线 → 左右各 12px 自然间隙
-        .background(HostTheme.bg, in: Capsule())
+        // 这里只加描边，不画 HostTheme.bg —— 因为虚线已经精确断开了，不需要背景色"盖住"
         .overlay(
             Capsule()
                 .stroke(HostTheme.muted.opacity(0.25), lineWidth: 1)
         )
+        // 但胶囊本身需要不透明背景色，这样虚线就真的不会被看到穿过它
+        .background(HostTheme.bg, in: Capsule())
     }
 
     // MARK: - Refresh Button
@@ -2858,7 +2894,15 @@ struct RefreshHintBar: View {
                 )
         }
         .buttonStyle(.plain)
-        .padding(.trailing, 0) // ZStack trailing 已经是最右端
+    }
+}
+
+// MARK: - PreferenceKey: 胶囊 frame 上报
+
+private struct CapsuleFrameKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
     }
 }
 
