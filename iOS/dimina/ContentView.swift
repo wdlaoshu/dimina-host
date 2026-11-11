@@ -577,19 +577,8 @@ struct ContentView: View {
                 }
             }
 
-            // 卡片区域：空状态展示灰色提示，有运行时横向滚动卡片
-            if isEmpty {
-                HStack {
-                    Image(systemName: "arrow.down")
-                        .font(.system(size: 10))
-                        .foregroundColor(HostTheme.muted.opacity(0.5))
-                    Text("下拉可同步远程小程序")
-                        .font(.system(size: 11))
-                        .foregroundColor(HostTheme.muted.opacity(0.6))
-                    Spacer()
-                }
-                .padding(.vertical, 6)
-            } else {
+            // 卡片区域：有运行时横向滚动卡片
+            if !isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
                         ForEach(runningItems) { item in
@@ -2812,7 +2801,7 @@ struct RefreshHintBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // 左侧：灰色小字提示 —— 无任何手势，外层 .refreshable 直接触达
+            // 左侧：胶囊包裹的灰色小字提示 —— 无任何手势，外层 .refreshable 直接触达
             HStack(spacing: 4) {
                 Image(systemName: "arrow.down")
                     .font(.system(size: 10, weight: .medium))
@@ -2820,6 +2809,13 @@ struct RefreshHintBar: View {
                     .font(.system(size: 11, weight: .medium))
             }
             .foregroundStyle(HostTheme.muted)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(HostTheme.surface, in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(HostTheme.muted.opacity(0.15), lineWidth: 0.5)
+            )
 
             Spacer(minLength: 0)
 
