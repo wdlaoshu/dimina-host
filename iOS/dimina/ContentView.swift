@@ -44,6 +44,8 @@ struct ContentView: View {
     @State private var dragLocation: CGPoint?
     /// 按下瞬间各格子的矩形（顺序与展示列表一致），拖动全程不变。
     @State private var dragSlots: [CGRect] = []
+    /// 本次拖动手指是否真正移动过（用于区分「长按看详情」和「拖动排序」）。
+    @State private var dragDidMove = false
     /// 当前仍在运行的小程序（前台排第一），由框架的实例快照刷新。
     @State private var runningIds: [String] = []
     @State private var showSwitcher = false
@@ -546,11 +548,19 @@ struct ContentView: View {
             .overlay(alignment: .topLeading) {
                 dragPreviewLayer
             }
+            // 拖动过程挂在稳定的容器上：卡片换行重建也不会中断手势（这是卡住的根因）。
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named("host-content"))
+                    .onChanged { updateDrag($0) }
+                    .onEnded { endDrag($0) }
+            )
             .onPreferenceChange(HostCardFrameKey.self) { frames in
                 cardFrames = frames
             }
         }
         .scrollIndicators(.hidden)
+        // 拖动排序期间锁住滚动，避免外层 ScrollView 抢走垂直手势把手势打断。
+        .scrollDisabled(draggingId != nil)
         // 搜索框弹出键盘后，点列表空白处或拖动列表都要能收起键盘，
         // 否则键盘会一直压在首页上。
         .scrollDismissesKeyboard(.immediately)
@@ -623,6 +633,7 @@ struct ContentView: View {
         dragLocation = nil
         dragFrames = [:]
         dragSlots = []
+        dragDidMove = false
     }
 
     private var runningStrip: some View {
@@ -875,64 +886,15 @@ struct ContentView: View {
             guard Date() >= suppressTapUntil else { return }
             activate(item)
         }
-        .gesture(
-            LongPressGesture(minimumDuration: 0.3)
-                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("host-content")))
-                .onChanged { value in
-                    guard case let .second(true, drag?) = value else { return }
-                    // 最近使用是按使用时间自动排的，不参与手动排序。
-                    guard filter != .recent else { return }
-                    if draggingId == nil {
-                        dragFrames = cardFrames
-                        dragSlots = visibleItems.compactMap { cardFrames[$0.appId] }
-                        draggingId = item.appId
-                        dragStart = drag.location
-                        dragLocation = drag.location
-                        // 长按已经算「排序 / 详情」，压掉随后可能补发的点击
-                        suppressTapUntil = Date().addingTimeInterval(5)
-                    }
-                    guard draggingId == item.appId else { return }
-                    dragLocation = drag.location
-                    // 用按下瞬间的格子矩形判断落在哪一格，再用「当前」第几格取目标，
-                    // 布局动画途中也不会两张卡片来回抢位。
-                    if let slot = dragSlots.firstIndex(where: { $0.contains(drag.location) }),
-                       slot < visibleItems.count {
-                        let target = visibleItems[slot].appId
-                        if target != item.appId {
-                            moveCard(item.appId, over: target)
-                        }
-                    }
-                }
-                .onEnded { value in
-                    guard draggingId == item.appId else {
-                        // 长按成功但手势停在 .first(true)（拖动未启动或被取消）→ 打开详情。
-                        switch value {
-                        case .first(true):
-                            suppressTapUntil = Date().addingTimeInterval(0.35)
-                            selectedItem = item
-                        case let .second(true, drag?):
-                            if abs(drag.translation.width) <= 6,
-                               abs(drag.translation.height) <= 6 {
-                                suppressTapUntil = Date().addingTimeInterval(0.35)
-                                selectedItem = item
-                            }
-                        default:
-                            break
-                        }
-                        return
-                    }
-                    var moved = false
-                    if case let .second(true, drag?) = value {
-                        moved = abs(drag.translation.width) > 6 || abs(drag.translation.height) > 6
-                    }
-                    resetDragState()
-                    suppressTapUntil = Date().addingTimeInterval(0.35)
-                    // 长按但没挪动 → 打开详情；拖动过则已经完成排序。
-                    if !moved {
-                        selectedItem = item
-                    }
-                }
-        )
+        // 长按只负责「开始拖」：拖动过程交给容器级手势，避免卡片换行重建时手势被打断。
+        .onLongPressGesture(minimumDuration: 0.3) {
+            if filter == .recent {
+                suppressTapUntil = Date().addingTimeInterval(0.35)
+                selectedItem = item
+            } else {
+                beginDrag(item)
+            }
+        }
     }
 
     /// 单列模式的视觉本体：图标 + 名称/版本 + 右侧状态，同样被拖动浮层复用。
@@ -992,64 +954,61 @@ struct ContentView: View {
             guard Date() >= suppressTapUntil else { return }
             activate(item)
         }
-        .gesture(
-            LongPressGesture(minimumDuration: 0.3)
-                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("host-content")))
-                .onChanged { value in
-                    guard case let .second(true, drag?) = value else { return }
-                    // 最近使用是按使用时间自动排的，不参与手动排序。
-                    guard filter != .recent else { return }
-                    if draggingId == nil {
-                        dragFrames = cardFrames
-                        dragSlots = visibleItems.compactMap { cardFrames[$0.appId] }
-                        draggingId = item.appId
-                        dragStart = drag.location
-                        dragLocation = drag.location
-                        // 长按已经算「排序 / 详情」，压掉随后可能补发的点击
-                        suppressTapUntil = Date().addingTimeInterval(5)
-                    }
-                    guard draggingId == item.appId else { return }
-                    dragLocation = drag.location
-                    // 用按下瞬间的格子矩形判断落在哪一格，再用「当前」第几格取目标，
-                    // 布局动画途中也不会两张卡片来回抢位。
-                    if let slot = dragSlots.firstIndex(where: { $0.contains(drag.location) }),
-                       slot < visibleItems.count {
-                        let target = visibleItems[slot].appId
-                        if target != item.appId {
-                            moveCard(item.appId, over: target)
-                        }
-                    }
-                }
-                .onEnded { value in
-                    guard draggingId == item.appId else {
-                        // 长按成功但手势停在 .first(true)（拖动未启动或被取消）→ 打开详情。
-                        switch value {
-                        case .first(true):
-                            suppressTapUntil = Date().addingTimeInterval(0.35)
-                            selectedItem = item
-                        case let .second(true, drag?):
-                            if abs(drag.translation.width) <= 6,
-                               abs(drag.translation.height) <= 6 {
-                                suppressTapUntil = Date().addingTimeInterval(0.35)
-                                selectedItem = item
-                            }
-                        default:
-                            break
-                        }
-                        return
-                    }
-                    var moved = false
-                    if case let .second(true, drag?) = value {
-                        moved = abs(drag.translation.width) > 6 || abs(drag.translation.height) > 6
-                    }
-                    resetDragState()
-                    suppressTapUntil = Date().addingTimeInterval(0.35)
-                    // 长按但没挪动 → 打开详情；拖动过则已经完成排序。
-                    if !moved {
-                        selectedItem = item
-                    }
-                }
-        )
+        // 长按只负责「开始拖」：拖动过程交给容器级手势，避免卡片换行重建时手势被打断。
+        .onLongPressGesture(minimumDuration: 0.3) {
+            if filter == .recent {
+                suppressTapUntil = Date().addingTimeInterval(0.35)
+                selectedItem = item
+            } else {
+                beginDrag(item)
+            }
+        }
+    }
+
+    /// 长按开始拖动：锁定按下瞬间的格子矩形，浮层从卡片中心起跟手。
+    private func beginDrag(_ item: HostHubItem) {
+        guard filter != .recent, draggingId == nil else { return }
+        dragFrames = cardFrames
+        dragSlots = visibleItems.compactMap { cardFrames[$0.appId] }
+        if let frame = cardFrames[item.appId] {
+            dragStart = CGPoint(x: frame.midX, y: frame.midY)
+            dragLocation = dragStart
+        }
+        dragDidMove = false
+        draggingId = item.appId
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        // 长按已经算「排序 / 详情」，压掉随后可能补发的点击
+        suppressTapUntil = Date().addingTimeInterval(5)
+    }
+
+    /// 手指移动：更新浮层位置，进入别的格子就换位。
+    private func updateDrag(_ drag: DragGesture.Value) {
+        guard let id = draggingId else { return }
+        dragLocation = drag.location
+        if let start = dragStart,
+           hypot(drag.location.x - start.x, drag.location.y - start.y) > 6 {
+            dragDidMove = true
+        }
+        // 用按下瞬间的格子矩形判断落在哪一格，再用「当前」第几格取目标，
+        // 布局动画途中也不会两张卡片来回抢位。
+        if let slot = dragSlots.firstIndex(where: { $0.contains(drag.location) }),
+           slot < visibleItems.count {
+            let target = visibleItems[slot].appId
+            if target != id {
+                moveCard(id, over: target)
+            }
+        }
+    }
+
+    /// 松手：没挪动 → 打开详情；挪动过 → 排序已在拖动中实时完成。
+    private func endDrag(_ drag: DragGesture.Value) {
+        guard let id = draggingId else { return }
+        let moved = dragDidMove
+        resetDragState()
+        suppressTapUntil = Date().addingTimeInterval(0.35)
+        if !moved, let item = hubItems.first(where: { $0.appId == id }) {
+            selectedItem = item
+        }
     }
 
     private func activate(_ item: HostHubItem) {
