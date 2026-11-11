@@ -3015,8 +3015,11 @@ private struct HostCardFrameKey: PreferenceKey {
 /// 包装 UIScrollView 并开启 `isDirectionalLockEnabled`，
 /// 用作外层垂直 ScrollView 的 nested horizontal scroll 容器时，
 /// 不会抢外层的垂直下拉手势（refreshable 第一次失效的根因）。
+/// 手动驱动 contentSize，绕开 Auto Layout 在 nested scroll 里的 intrinsic 宽度推导问题。
 private struct DirectionalLockHScrollView<Content: View>: UIViewRepresentable {
     @ViewBuilder let content: Content
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> UIScrollView {
         let sv = UIScrollView()
@@ -3029,20 +3032,34 @@ private struct DirectionalLockHScrollView<Content: View>: UIViewRepresentable {
         host.view.translatesAutoresizingMaskIntoConstraints = false
         host.view.backgroundColor = .clear
         sv.addSubview(host.view)
-        // 横向滚动：内容宽度由 intrinsicContentSize 自然撑开，
-        // 只约束 contentLayoutGuide（决定 contentSize.width）和高度。
+        context.coordinator.host = host
+        context.coordinator.scrollView = sv
+        // 手动手动：先贴住 top/leading，等 host 布局完再算 contentSize。
         NSLayoutConstraint.activate([
-            host.view.topAnchor.constraint(equalTo: sv.contentLayoutGuide.topAnchor),
-            host.view.bottomAnchor.constraint(equalTo: sv.contentLayoutGuide.bottomAnchor),
-            host.view.leadingAnchor.constraint(equalTo: sv.contentLayoutGuide.leadingAnchor),
-            host.view.trailingAnchor.constraint(equalTo: sv.contentLayoutGuide.trailingAnchor),
-            host.view.heightAnchor.constraint(equalTo: sv.frameLayoutGuide.heightAnchor),
+            host.view.topAnchor.constraint(equalTo: sv.topAnchor),
+            host.view.leadingAnchor.constraint(equalTo: sv.leadingAnchor),
+            host.view.heightAnchor.constraint(equalTo: sv.heightAnchor),
         ])
         return sv
     }
 
     func updateUIView(_ uiView: UIScrollView, context: Context) {
-        (uiView.subviews.first as? UIHostingController<Content>)?.rootView = content
+        guard let host = context.coordinator.host else { return }
+        host.rootView = content
+        // 等一帧 UIHostingController 完成布局后设置 contentSize
+        DispatchQueue.main.async {
+            let size = host.view.systemLayoutSizeFitting(
+                UIView.layoutFittingCompressedSize,
+                withHorizontalFittingPriority: .fittingSizeLevel,
+                verticalFittingPriority: .required
+            )
+            uiView.contentSize = CGSize(width: max(size.width, uiView.bounds.width), height: uiView.bounds.height)
+        }
+    }
+
+    class Coordinator {
+        var host: UIHostingController<Content>?
+        var scrollView: UIScrollView?
     }
 }
 
