@@ -44,6 +44,8 @@ struct ContentView: View {
     @State private var runningIds: [String] = []
     @State private var showSwitcher = false
     @State private var showCloseAllConfirm = false
+    /// 下拉刷新状态，驱动顶部提示条的"同步中"文案。
+    @State private var isRefreshing = false
 
     /// 存储UINavigationController的引用
     static var navigationController: UINavigationController?
@@ -409,6 +411,10 @@ struct ContentView: View {
         // SwiftUI 嵌套滚动视图会出现手势竞争，导致下拉刷新偶发被内层吃掉。
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                // 刷新提示条：放在所有卡片之前，专门给下拉手势留的"安全区"。
+                // 这里没有任何 Drag/LongPress 手势，外层 ScrollView 的 refreshable 直接触达。
+                RefreshHintBar(isRefreshing: isRefreshing)
+
                 if !runningIds.isEmpty {
                     runningStrip
                 }
@@ -469,9 +475,11 @@ struct ContentView: View {
         // 搜索框弹出键盘后，点列表空白处或拖动列表都要能收起键盘，
         // 否则键盘会一直压在首页上。
         .scrollDismissesKeyboard(.immediately)
-        // 下拉刷新挂在 ScrollView 上；单一滚动容器不会再有内层抢手势的问题。
+        // 下拉刷新挂在 ScrollView 上；提示条区域无手势，外层 refreshable 直接触达。
         .refreshable {
+            isRefreshing = true
             await sync(force: true)
+            isRefreshing = false
         }
         // 点内容空白处收起键盘，不再用 simultaneousGesture——它会干扰 refreshable 的手势识别。
         .onTapGesture { searchFocused = false }
@@ -2758,6 +2766,40 @@ private struct HostAppearanceObserver: UIViewControllerRepresentable {
             super.viewWillAppear(animated)
             onAppear?()
         }
+    }
+}
+
+// MARK: - Refresh Hint Bar
+
+/// 放在 ScrollView 顶部的"下拉刷新"文字提示条。
+/// 这里不加任何 Drag/LongPress 手势，专门给外层 .refreshable 留的安全区。
+/// 运行中横条和小程序卡片都挂了 DragGesture（长按排序），子视图手势优先的规则
+/// 会把外层刷新手势挤走，所以提示条必须是"纯净"的无手势区域。
+struct RefreshHintBar: View {
+    let isRefreshing: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: isRefreshing ? "arrow.2.circlepath" : "arrow.down")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(isRefreshing ? 0 : 0))
+            if isRefreshing {
+                ProgressView()
+                    .controlSize(.mini)
+                    .scaleEffect(0.7)
+                Text("正在同步…")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("下拉刷新")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 24)
+        // 关键：不加 .onTapGesture / .gesture / .overlay 等任何手势修饰符
     }
 }
 
