@@ -762,7 +762,7 @@ struct ContentView: View {
         }
         .gesture(
             LongPressGesture(minimumDuration: 0.3)
-                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("host-content")))
+                .sequenced(before: DragGesture(minimumDistance: 6, coordinateSpace: .named("host-content")))
                 .onChanged { value in
                     guard case let .second(true, drag?) = value else { return }
                     // 最近使用是按使用时间自动排的，不参与手动排序。
@@ -874,7 +874,7 @@ struct ContentView: View {
         }
         .gesture(
             LongPressGesture(minimumDuration: 0.3)
-                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("host-content")))
+                .sequenced(before: DragGesture(minimumDistance: 6, coordinateSpace: .named("host-content")))
                 .onChanged { value in
                     guard case let .second(true, drag?) = value else { return }
                     // 最近使用是按使用时间自动排的，不参与手动排序。
