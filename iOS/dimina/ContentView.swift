@@ -411,9 +411,13 @@ struct ContentView: View {
         // SwiftUI 嵌套滚动视图会出现手势竞争，导致下拉刷新偶发被内层吃掉。
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                // 刷新提示条：放在所有卡片之前，专门给下拉手势留的"安全区"。
-                // 这里没有任何 Drag/LongPress 手势，外层 ScrollView 的 refreshable 直接触达。
-                RefreshHintBar(isRefreshing: isRefreshing)
+                // 刷新提示条：虚线分割线 + 居中胶囊 + 最右刷新按钮
+                // 整个区域无 Drag/LongPress 手势，专门给外层 .refreshable 留的安全区
+                RefreshHintBar(isRefreshing: isRefreshing) {
+                    isRefreshing = true
+                    await sync(force: true)
+                    isRefreshing = false
+                }
 
                 if !runningIds.isEmpty {
                     runningStrip
@@ -2772,34 +2776,89 @@ private struct HostAppearanceObserver: UIViewControllerRepresentable {
 // MARK: - Refresh Hint Bar
 
 /// 放在 ScrollView 顶部的"下拉刷新"文字提示条。
-/// 这里不加任何 Drag/LongPress 手势，专门给外层 .refreshable 留的安全区。
-/// 运行中横条和小程序卡片都挂了 DragGesture（长按排序），子视图手势优先的规则
-/// 会把外层刷新手势挤走，所以提示条必须是"纯净"的无手势区域。
+/// 下拉刷新提示条：虚线分割线 + 居中胶囊 + 最右刷新按钮。
+/// 整个区域**不挂任何 Drag/LongPress 手势**——专门给外层 .refreshable 留的"安全区"。
+/// 胶囊用 HostTheme.bg（页面背景色）盖住底下的虚线，自然产生视觉间隙。
+/// 刷新按钮可点击，直接调 sync(force:true)，动画效果和 iOS 原生 refreshable 一致。
 struct RefreshHintBar: View {
     let isRefreshing: Bool
+    let onRefresh: () async -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: isRefreshing ? "arrow.2.circlepath" : "arrow.down")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .rotationEffect(.degrees(isRefreshing ? 0 : 0))
-            if isRefreshing {
-                ProgressView()
-                    .controlSize(.mini)
-                    .scaleEffect(0.7)
-                Text("正在同步…")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("下拉刷新")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+        ZStack {
+            // 底层：横跨整行的虚线 Path
+            // 右边预留 38px（26px 按钮 + 12px 间隙），虚线自然停在按钮左边
+            GeometryReader { geo in
+                Path { path in
+                    let midY = geo.size.height / 2
+                    path.move(to:    CGPoint(x: 0,             y: midY))
+                    path.addLine(to: CGPoint(x: geo.size.width - 38, y: midY))
+                }
+                .stroke(
+                    HostTheme.muted.opacity(0.5),
+                    style: StrokeStyle(lineWidth: 1, dash: [4, 4], dashPhase: 0)
+                )
             }
+
+            // 胶囊：ZStack 中心定位，背景色盖住底下的虚线 → 自然间隙
+            capsule
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+
+            // 刷新按钮：ZStack 最右端定位
+            refreshButton
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 24)
-        // 关键：不加 .onTapGesture / .gesture / .overlay 等任何手势修饰符
+        .frame(height: 28)
+    }
+
+    // MARK: - Capsule
+
+    private var capsule: some View {
+        HStack(spacing: 4) {
+            Image(systemName: isRefreshing ? "arrow.2.circlepath" : "arrow.down")
+                .font(.system(size: 10, weight: .medium))
+                .rotationEffect(.degrees(isRefreshing ? 0 : 0))
+            Text(isRefreshing ? "正在同步…" : "下拉刷新")
+                .font(.caption2)
+                .fontWeight(.medium)
+        }
+        .foregroundStyle(HostTheme.muted)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 3)
+        // 关键：背景色 = 页面背景色 → 胶囊"吃掉"底下的虚线 → 左右各 12px 自然间隙
+        .background(HostTheme.bg, in: Capsule())
+        .overlay(
+            Capsule()
+                .stroke(HostTheme.muted.opacity(0.25), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Refresh Button
+
+    private var refreshButton: some View {
+        Button {
+            Task { await onRefresh() }
+        } label: {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(HostTheme.muted)
+                .frame(width: 26, height: 26)
+                .background(HostTheme.surface, in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(HostTheme.muted.opacity(0.25), lineWidth: 1)
+                )
+                // 刷新动画：0.8s linear 无限旋转，和 iOS 原生 refreshable 一致
+                .rotationEffect(.degrees(isRefreshing ? 360 : 0))
+                .animation(
+                    isRefreshing
+                        ? .linear(duration: 0.8).repeatForever(autoreverses: false)
+                        : .default,
+                    value: isRefreshing
+                )
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, 0) // ZStack trailing 已经是最右端
     }
 }
 
