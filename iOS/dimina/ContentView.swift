@@ -44,6 +44,8 @@ struct ContentView: View {
     @State private var dragLocation: CGPoint?
     /// 按下瞬间各格子的矩形（顺序与展示列表一致），拖动全程不变。
     @State private var dragSlots: [CGRect] = []
+    /// 卡片长按/拖动手势是否在进行中；手势被系统取消时 SwiftUI 会自动复位为 false。
+    @GestureState private var cardGestureActive = false
     /// 当前仍在运行的小程序（前台排第一），由框架的实例快照刷新。
     @State private var runningIds: [String] = []
     @State private var showSwitcher = false
@@ -111,6 +113,17 @@ struct ContentView: View {
         )
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             refreshRunning()
+        }
+        // 手势被系统取消（滚动竞争 / 视图重建）时 GestureState 会复位，
+        // 在这里兜底清掉拖动状态，避免跟手浮层永久卡在屏幕上。
+        // 延迟一点执行，确保正常结束的 onEnded（打开详情 / 落位）先跑完。
+        .onChange(of: cardGestureActive) { _, active in
+            guard !active, draggingId != nil else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                if draggingId != nil {
+                    resetDragState()
+                }
+            }
         }
         .sheet(isPresented: $showSwitcher) {
             switcherSheet
@@ -611,7 +624,18 @@ struct ContentView: View {
     }
 
     private func refreshRunning() {
+        // 拖动排序进行中不重建运行中列表：布局变化会打断手势，导致跟手浮层卡住。
+        guard draggingId == nil, !cardGestureActive else { return }
         runningIds = DMPAppManager.sharedInstance().runningMiniPrograms().map(\.appId)
+    }
+
+    /// 清空拖动相关状态（手势正常结束或被系统取消时调用）。
+    private func resetDragState() {
+        draggingId = nil
+        dragStart = nil
+        dragLocation = nil
+        dragFrames = [:]
+        dragSlots = []
     }
 
     private var runningStrip: some View {
@@ -867,6 +891,9 @@ struct ContentView: View {
         .gesture(
             LongPressGesture(minimumDuration: 0.3)
                 .sequenced(before: DragGesture(minimumDistance: 6, coordinateSpace: .named("host-content")))
+                // 手势被系统取消（滚动竞争 / 视图重建）时 GestureState 会自动复位，
+                // 用它兜底清理拖动状态，避免跟手浮层永久卡在屏幕上。
+                .updating($cardGestureActive) { _, active, _ in active = true }
                 .onChanged { value in
                     guard case let .second(true, drag?) = value else { return }
                     // 最近使用是按使用时间自动排的，不参与手动排序。
@@ -988,6 +1015,9 @@ struct ContentView: View {
         .gesture(
             LongPressGesture(minimumDuration: 0.3)
                 .sequenced(before: DragGesture(minimumDistance: 6, coordinateSpace: .named("host-content")))
+                // 手势被系统取消（滚动竞争 / 视图重建）时 GestureState 会自动复位，
+                // 用它兜底清理拖动状态，避免跟手浮层永久卡在屏幕上。
+                .updating($cardGestureActive) { _, active, _ in active = true }
                 .onChanged { value in
                     guard case let .second(true, drag?) = value else { return }
                     // 最近使用是按使用时间自动排的，不参与手动排序。
