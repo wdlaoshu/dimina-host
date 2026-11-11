@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct ContentView: View {
@@ -552,7 +553,7 @@ struct ContentView: View {
                 .buttonStyle(.plain)
             }
 
-            ScrollView(.horizontal, showsIndicators: false) {
+            DirectionalLockHScrollView {
                 HStack(spacing: 10) {
                     ForEach(runningItems) { item in
                         Button {
@@ -3008,6 +3009,38 @@ private struct HostCardFrameKey: PreferenceKey {
 
     static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
         value.merge(nextValue()) { _, new in new }
+    }
+}
+
+/// 包装 UIScrollView 并开启 `isDirectionalLockEnabled`，
+/// 用作外层垂直 ScrollView 的 nested horizontal scroll 容器时，
+/// 不会抢外层的垂直下拉手势（refreshable 第一次失效的根因）。
+private struct DirectionalLockHScrollView<Content: View>: UIViewRepresentable {
+    @ViewBuilder let content: Content
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let sv = UIScrollView()
+        sv.isDirectionalLockEnabled = true
+        sv.showsHorizontalScrollIndicator = false
+        sv.showsVerticalScrollIndicator = false
+        sv.alwaysBounceHorizontal = true
+        sv.alwaysBounceVertical = false
+        let host = UIHostingController(rootView: content)
+        host.view.translatesAutoresizingMaskIntoConstraints = false
+        host.view.backgroundColor = .clear
+        sv.addSubview(host.view)
+        NSLayoutConstraint.activate([
+            host.view.topAnchor.constraint(equalTo: sv.topAnchor),
+            host.view.bottomAnchor.constraint(equalTo: sv.bottomAnchor),
+            host.view.leadingAnchor.constraint(equalTo: sv.leadingAnchor),
+            host.view.trailingAnchor.constraint(equalTo: sv.trailingAnchor),
+            host.view.heightAnchor.constraint(equalTo: sv.heightAnchor),
+        ])
+        return sv
+    }
+
+    func updateUIView(_ uiView: UIScrollView, context: Context) {
+        (uiView.subviews.first as? UIHostingController<Content>)?.rootView = content
     }
 }
 
