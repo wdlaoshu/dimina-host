@@ -2451,6 +2451,35 @@ private fun SettingsSheet(
         )
 
         Spacer(Modifier.height(16.dp))
+        Text("后台保活", color = HostText, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(1, 2, 3, 5, 8).forEach { count ->
+                val selected = catalog.config.maxBackgroundApps == count
+                Text(
+                    text = "$count 个",
+                    color = if (selected) HostSurface else HostMuted,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(if (selected) HostText else HostSurface)
+                        .clickable {
+                            catalog.updateConfig { it.copy(maxBackgroundApps = count) }
+                            App.applyRetention(count)
+                        }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                )
+            }
+        }
+        Text(
+            "小程序退到后台后常驻，超出数量时回收最久未用的；调小后在下一次切换时生效",
+            color = HostMuted,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+
+        Spacer(Modifier.height(16.dp))
         Text("存储", color = HostText, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
         Surface(color = HostBg, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {

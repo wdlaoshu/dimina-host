@@ -84,6 +84,8 @@ data class HostCatalogConfig(
     val listLayout: Boolean = false,
     /** 宿主外观：system（跟随系统）/ light / dark。 */
     val themeMode: String = THEME_SYSTEM,
+    /** 后台保活的小程序数量上限；实例常驻不超时，仅超出上限时回收最久未用的。 */
+    val maxBackgroundApps: Int = 3,
 ) {
     companion object {
         const val THEME_SYSTEM = "system"
@@ -183,6 +185,7 @@ object HostCatalogStore {
             listLayout = prefs.getBoolean("list_layout", false),
             themeMode = prefs.getString("theme_mode", HostCatalogConfig.THEME_SYSTEM)
                 ?: HostCatalogConfig.THEME_SYSTEM,
+            maxBackgroundApps = prefs.getInt("max_background_apps", 3),
         )
     }
 
@@ -199,6 +202,7 @@ object HostCatalogStore {
             .putBoolean("debug_enabled", config.debugEnabled)
             .putBoolean("list_layout", config.listLayout)
             .putString("theme_mode", config.themeMode)
+            .putInt("max_background_apps", config.maxBackgroundApps)
             .apply()
     }
 

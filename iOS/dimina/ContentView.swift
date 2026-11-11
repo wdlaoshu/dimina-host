@@ -87,6 +87,10 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
             manualOrder = UserDefaults.standard.stringArray(forKey: Self.appOrderKey) ?? []
+            // 按设置应用后台保活数量：常驻不超时，只受数量上限约束。
+            DMPAppManager.sharedInstance().configureRetention(
+                DMPRetentionPolicy(maxBackgroundApps: catalog.config.maxBackgroundApps, backgroundTimeoutMs: 0)
+            )
             permissions.refresh()
             refreshRunning()
             autoOpenAppForTestIfRequested()
@@ -1991,6 +1995,8 @@ private struct HostSettingsSheet: View {
 
                 themeSection
 
+                retentionSection
+
                 storageSection
                 diagnosticsRow
                 networkCard
@@ -2054,6 +2060,43 @@ private struct HostSettingsSheet: View {
                 .font(.system(size: 11))
                 .foregroundColor(HostTheme.muted)
         }
+    }
+
+    /// 后台保活数量：实例常驻不超时，只受数量上限约束（内存压力时系统仍会兜底回收）。
+    private var retentionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("后台保活")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(HostTheme.text)
+            HStack(spacing: 8) {
+                ForEach([1, 2, 3, 5, 8], id: \.self) { count in
+                    let selected = catalog.config.maxBackgroundApps == count
+                    Text("\(count) 个")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(selected ? HostTheme.surface : HostTheme.muted)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(selected ? HostTheme.text : HostTheme.surface)
+                        .clipShape(Capsule())
+                        .contentShape(Capsule())
+                        .onTapGesture {
+                            catalog.updateConfig { $0.maxBackgroundApps = count }
+                            applyRetention(count)
+                        }
+                }
+                Spacer(minLength: 0)
+            }
+            Text("小程序退到后台后常驻，超出数量时回收最久未用的；调小后在下一次切换时生效")
+                .font(.system(size: 11))
+                .foregroundColor(HostTheme.muted)
+        }
+    }
+
+    /// 应用保活数量：常驻不超时，超出上限时框架按最久未用回收。
+    private func applyRetention(_ count: Int) {
+        DMPAppManager.sharedInstance().configureRetention(
+            DMPRetentionPolicy(maxBackgroundApps: count, backgroundTimeoutMs: 0)
+        )
     }
 
     private var sourceSection: some View {

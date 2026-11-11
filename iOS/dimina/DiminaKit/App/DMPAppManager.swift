@@ -80,7 +80,7 @@ public struct DMPRetentionPolicy {
     public let maxBackgroundApps: Int
     public let backgroundTimeoutMs: Int
 
-    public init(maxBackgroundApps: Int = 3, backgroundTimeoutMs: Int = 300_000) {
+    public init(maxBackgroundApps: Int = 3, backgroundTimeoutMs: Int = 0) {
         precondition(maxBackgroundApps >= 0 && backgroundTimeoutMs >= 0,
                      "Retention limits must be non-negative")
         self.maxBackgroundApps = maxBackgroundApps

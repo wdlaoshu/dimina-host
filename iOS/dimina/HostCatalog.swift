@@ -105,6 +105,8 @@ struct HostCatalogConfig: Codable, Equatable {
     var autoInstall: Bool
     /// 小程序调试面板（vConsole）开关，默认关闭，需要时在设置里打开。
     var debugEnabled: Bool
+    /// 后台保活的小程序数量上限；实例常驻不超时，仅超出上限时回收最久未用的。
+    var maxBackgroundApps: Int
 
     static let `default` = HostCatalogConfig(
         source: HostCatalogConfig.defaultSource,
@@ -131,7 +133,8 @@ struct HostCatalogConfig: Codable, Equatable {
         autoCheck: Bool,
         wifiOnlyAutoDownload: Bool,
         autoInstall: Bool,
-        debugEnabled: Bool = false
+        debugEnabled: Bool = false,
+        maxBackgroundApps: Int = 3
     ) {
         self.source = source
         self.channel = channel
@@ -141,6 +144,7 @@ struct HostCatalogConfig: Codable, Equatable {
         self.wifiOnlyAutoDownload = wifiOnlyAutoDownload
         self.autoInstall = autoInstall
         self.debugEnabled = debugEnabled
+        self.maxBackgroundApps = maxBackgroundApps
     }
 
     /// Tolerate configs persisted before auth fields existed.
@@ -154,6 +158,7 @@ struct HostCatalogConfig: Codable, Equatable {
         wifiOnlyAutoDownload = try container.decodeIfPresent(Bool.self, forKey: .wifiOnlyAutoDownload) ?? true
         autoInstall = try container.decodeIfPresent(Bool.self, forKey: .autoInstall) ?? false
         debugEnabled = try container.decodeIfPresent(Bool.self, forKey: .debugEnabled) ?? false
+        maxBackgroundApps = try container.decodeIfPresent(Int.self, forKey: .maxBackgroundApps) ?? 3
     }
 }
 

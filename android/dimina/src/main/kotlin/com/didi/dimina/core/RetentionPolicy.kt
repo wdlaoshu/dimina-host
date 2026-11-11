@@ -3,7 +3,8 @@ package com.didi.dimina.core
 /** SDK defaults, not a promise about another client's cache capacity. */
 data class RetentionPolicy(
     val maxBackgroundApps: Int = 3,
-    val backgroundTimeoutMs: Long = 300_000,
+    // 默认常驻：不因超时而回收；为 0 时后台实例只受数量上限与内存压力约束。
+    val backgroundTimeoutMs: Long = 0,
 ) {
     init {
         require(maxBackgroundApps >= 0) { "maxBackgroundApps must be non-negative" }
