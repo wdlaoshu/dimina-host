@@ -3029,12 +3029,14 @@ private struct DirectionalLockHScrollView<Content: View>: UIViewRepresentable {
         host.view.translatesAutoresizingMaskIntoConstraints = false
         host.view.backgroundColor = .clear
         sv.addSubview(host.view)
+        // 横向滚动：内容宽度由 intrinsicContentSize 自然撑开，
+        // 只约束 contentLayoutGuide（决定 contentSize.width）和高度。
         NSLayoutConstraint.activate([
-            host.view.topAnchor.constraint(equalTo: sv.topAnchor),
-            host.view.bottomAnchor.constraint(equalTo: sv.bottomAnchor),
-            host.view.leadingAnchor.constraint(equalTo: sv.leadingAnchor),
-            host.view.trailingAnchor.constraint(equalTo: sv.trailingAnchor),
-            host.view.heightAnchor.constraint(equalTo: sv.heightAnchor),
+            host.view.topAnchor.constraint(equalTo: sv.contentLayoutGuide.topAnchor),
+            host.view.bottomAnchor.constraint(equalTo: sv.contentLayoutGuide.bottomAnchor),
+            host.view.leadingAnchor.constraint(equalTo: sv.contentLayoutGuide.leadingAnchor),
+            host.view.trailingAnchor.constraint(equalTo: sv.contentLayoutGuide.trailingAnchor),
+            host.view.heightAnchor.constraint(equalTo: sv.frameLayoutGuide.heightAnchor),
         ])
         return sv
     }
