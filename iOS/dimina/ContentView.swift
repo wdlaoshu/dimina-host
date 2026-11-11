@@ -894,12 +894,21 @@ struct ContentView: View {
                 }
                 .onEnded { value in
                     guard draggingId == item.appId else {
-                        // 最近使用里长按不动，仍然可以看详情。
-                        if filter == .recent,
-                           case let .second(true, drag?) = value,
-                           abs(drag.translation.width) <= 6,
-                           abs(drag.translation.height) <= 6 {
+                        // 长按成功但没进入拖动（DragGesture 未达 6pt 阈值）→ 打开详情。
+                        // 注意 v1.0.41 把 minimumDistance 调成 6 之后，纯长按不再产生
+                        // .second(true, drag)，只有 .first(true)，必须单独处理。
+                        switch value {
+                        case .first(true):
+                            suppressTapUntil = Date().addingTimeInterval(0.35)
                             selectedItem = item
+                        case let .second(true, drag?):
+                            if abs(drag.translation.width) <= 6,
+                               abs(drag.translation.height) <= 6 {
+                                suppressTapUntil = Date().addingTimeInterval(0.35)
+                                selectedItem = item
+                            }
+                        default:
+                            break
                         }
                         return
                     }
@@ -1006,12 +1015,21 @@ struct ContentView: View {
                 }
                 .onEnded { value in
                     guard draggingId == item.appId else {
-                        // 最近使用里长按不动，仍然可以看详情。
-                        if filter == .recent,
-                           case let .second(true, drag?) = value,
-                           abs(drag.translation.width) <= 6,
-                           abs(drag.translation.height) <= 6 {
+                        // 长按成功但没进入拖动（DragGesture 未达 6pt 阈值）→ 打开详情。
+                        // 注意 v1.0.41 把 minimumDistance 调成 6 之后，纯长按不再产生
+                        // .second(true, drag)，只有 .first(true)，必须单独处理。
+                        switch value {
+                        case .first(true):
+                            suppressTapUntil = Date().addingTimeInterval(0.35)
                             selectedItem = item
+                        case let .second(true, drag?):
+                            if abs(drag.translation.width) <= 6,
+                               abs(drag.translation.height) <= 6 {
+                                suppressTapUntil = Date().addingTimeInterval(0.35)
+                                selectedItem = item
+                            }
+                        default:
+                            break
                         }
                         return
                     }
