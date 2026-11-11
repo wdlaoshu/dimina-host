@@ -535,10 +535,9 @@ struct ContentView: View {
         let isEmpty = runningItems.isEmpty
 
         return VStack(alignment: .leading, spacing: 10) {
-            // Header：运行中状态 / 空状态提示 + 刷新入口
+            // Header：只有状态 + "全部 >"，刷新胶囊挪到下方卡片区域
             HStack(spacing: 7) {
                 if isEmpty {
-                    // 空状态：灰色圆点 + "当前无程序运行"
                     Circle()
                         .fill(HostTheme.muted.opacity(0.4))
                         .frame(width: 6, height: 6)
@@ -546,7 +545,6 @@ struct ContentView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(HostTheme.muted)
                 } else {
-                    // 正常状态：绿色圆点 + 数量
                     Circle()
                         .fill(HostTheme.green)
                         .frame(width: 6, height: 6)
@@ -554,16 +552,7 @@ struct ContentView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(HostTheme.text)
                 }
-
                 Spacer(minLength: 4)
-
-                // "下拉刷新"提示胶囊 —— 和"全部 >" / "刷新"按钮在同一行
-                RefreshCapsule(isRefreshing: isRefreshing) {
-                    isRefreshing = true
-                    Task { await sync(force: true) }
-                    isRefreshing = false
-                }
-
                 if !isEmpty {
                     Button {
                         refreshRunning()
@@ -581,21 +570,18 @@ struct ContentView: View {
                 }
             }
 
-            if isEmpty {
-                // 空状态占位：一行灰色提示文字，保持卡片区域的视觉高度
-                HStack {
-                    Image(systemName: "arrow.down")
-                        .font(.system(size: 10))
-                        .foregroundColor(HostTheme.muted.opacity(0.5))
-                    Text("下拉刷新可同步远程小程序")
-                        .font(.system(size: 11))
-                        .foregroundColor(HostTheme.muted.opacity(0.6))
-                    Spacer()
-                }
-                .padding(.vertical, 6)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
+            // 卡片区域：RefreshCapsule 作为横向滚动序列的第一个"卡片"
+            // 空状态时 RefreshCapsule 是唯一卡片，保持视觉高度
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    // 刷新胶囊卡片：和运行中卡片同一层级、同样的外观语言
+                    RefreshCapsule(isRefreshing: isRefreshing) {
+                        isRefreshing = true
+                        Task { await sync(force: true) }
+                        isRefreshing = false
+                    }
+
+                    if !isEmpty {
                         ForEach(runningItems) { item in
                             Button {
                                 activateRunning(item)
@@ -605,8 +591,8 @@ struct ContentView: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(.vertical, 1)
                 }
+                .padding(.vertical, 1)
             }
         }
         .padding(12)
@@ -2806,9 +2792,9 @@ private struct HostAppearanceObserver: UIViewControllerRepresentable {
 
 // MARK: - Refresh Capsule
 
-/// 融合在 runningStrip header 里的刷新入口。
-/// 极简胶囊：一个 refresh icon + 文字 + 点击刷新。
-/// 不挂 Drag/LongPress 手势，只响应 Button tap，不干扰外层 .refreshable。
+/// 融合在 runningStrip 卡片区域里的刷新入口。
+/// 作为横向滚动序列的第一个"卡片"出现，外观和 runningCard 一致（132×96，圆角矩形）。
+/// 内部放一个 refresh icon + "下拉刷新" 文字，点击触发 sync(force:true)。
 struct RefreshCapsule: View {
     let isRefreshing: Bool
     let onRefresh: () async -> Void
@@ -2817,9 +2803,10 @@ struct RefreshCapsule: View {
         Button {
             Task { await onRefresh() }
         } label: {
-            HStack(spacing: 3) {
+            VStack(spacing: 6) {
                 Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(HostTheme.muted)
                     .rotationEffect(.degrees(isRefreshing ? 360 : 0))
                     .animation(
                         isRefreshing
@@ -2827,16 +2814,16 @@ struct RefreshCapsule: View {
                             : .default,
                         value: isRefreshing
                     )
-                Text(isRefreshing ? "同步中" : "下拉刷新")
-                    .font(.system(size: 10, weight: .medium))
+                Text(isRefreshing ? "同步中…" : "下拉刷新")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(HostTheme.muted)
             }
-            .foregroundStyle(HostTheme.muted)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(HostTheme.bg, in: Capsule())
+            .frame(width: 132, height: 96)
+            .background(HostTheme.bg.opacity(0.65))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
-                Capsule()
-                    .stroke(HostTheme.muted.opacity(0.2), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(HostTheme.muted.opacity(0.15), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
