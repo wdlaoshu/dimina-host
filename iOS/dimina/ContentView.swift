@@ -411,8 +411,15 @@ struct ContentView: View {
         // SwiftUI 嵌套滚动视图会出现手势竞争，导致下拉刷新偶发被内层吃掉。
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                // 运行中横条：常驻显示。无运行时展示空状态提示。
-                // 空状态下整行不可点，但 ScrollView 外层 .refreshable 能触达。
+                // 独立刷新提示条：在 runningStrip 上方，无任何 Drag/LongPress 手势
+                // 专门给外层 ScrollView .refreshable 留的"安全区"
+                RefreshHintBar(isRefreshing: isRefreshing) {
+                    isRefreshing = true
+                    await sync(force: true)
+                    isRefreshing = false
+                }
+
+                // 运行中横条：常驻显示。无运行时展示空状态。
                 runningStrip
 
                 if !updatableItems.isEmpty && filter != .updates {
@@ -535,7 +542,7 @@ struct ContentView: View {
         let isEmpty = runningItems.isEmpty
 
         return VStack(alignment: .leading, spacing: 10) {
-            // Header：只有状态 + "全部 >"，刷新胶囊挪到下方卡片区域
+            // Header：状态 + "全部 >"
             HStack(spacing: 7) {
                 if isEmpty {
                     Circle()
@@ -570,18 +577,21 @@ struct ContentView: View {
                 }
             }
 
-            // 卡片区域：RefreshCapsule 作为横向滚动序列的第一个"卡片"
-            // 空状态时 RefreshCapsule 是唯一卡片，保持视觉高度
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    // 刷新胶囊卡片：和运行中卡片同一层级、同样的外观语言
-                    RefreshCapsule(isRefreshing: isRefreshing) {
-                        isRefreshing = true
-                        Task { await sync(force: true) }
-                        isRefreshing = false
-                    }
-
-                    if !isEmpty {
+            // 卡片区域：空状态展示灰色提示，有运行时横向滚动卡片
+            if isEmpty {
+                HStack {
+                    Image(systemName: "arrow.down")
+                        .font(.system(size: 10))
+                        .foregroundColor(HostTheme.muted.opacity(0.5))
+                    Text("下拉可同步远程小程序")
+                        .font(.system(size: 11))
+                        .foregroundColor(HostTheme.muted.opacity(0.6))
+                    Spacer()
+                }
+                .padding(.vertical, 6)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
                         ForEach(runningItems) { item in
                             Button {
                                 activateRunning(item)
@@ -591,8 +601,8 @@ struct ContentView: View {
                             .buttonStyle(.plain)
                         }
                     }
+                    .padding(.vertical, 1)
                 }
-                .padding(.vertical, 1)
             }
         }
         .padding(12)
@@ -2790,23 +2800,42 @@ private struct HostAppearanceObserver: UIViewControllerRepresentable {
     }
 }
 
-// MARK: - Refresh Capsule
+// MARK: - Refresh Hint Bar
 
-/// 融合在 runningStrip 卡片区域里的刷新入口。
-/// 作为横向滚动序列的第一个"卡片"出现，外观和 runningCard 一致（132×96，圆角矩形）。
-/// 内部放一个 refresh icon + "下拉刷新" 文字，点击触发 sync(force:true)。
-struct RefreshCapsule: View {
+/// runningStrip 上方的独立刷新提示条。
+/// 极简：一行 HStack，左边"↓ 下拉刷新"灰色文字，右边刷新按钮。
+/// 整个区域**不加任何 Drag/LongPress 手势**——专门给外层 .refreshable 留的"安全区"。
+/// 刷新按钮是 Button tap，和 ScrollView 的 drag 手势天然正交不冲突。
+struct RefreshHintBar: View {
     let isRefreshing: Bool
     let onRefresh: () async -> Void
 
     var body: some View {
-        Button {
-            Task { await onRefresh() }
-        } label: {
-            VStack(spacing: 6) {
+        HStack(spacing: 0) {
+            // 左侧：灰色小字提示 —— 无任何手势，外层 .refreshable 直接触达
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 10, weight: .medium))
+                Text(isRefreshing ? "正在同步…" : "下拉刷新")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundStyle(HostTheme.muted)
+
+            Spacer(minLength: 0)
+
+            // 右侧：圆形刷新按钮 —— Button tap，天然不抢 drag
+            Button {
+                Task { await onRefresh() }
+            } label: {
                 Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 22, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(HostTheme.muted)
+                    .frame(width: 28, height: 28)
+                    .background(HostTheme.surface, in: Circle())
+                    .overlay(
+                        Circle()
+                            .stroke(HostTheme.muted.opacity(0.15), lineWidth: 0.5)
+                    )
                     .rotationEffect(.degrees(isRefreshing ? 360 : 0))
                     .animation(
                         isRefreshing
@@ -2814,20 +2843,12 @@ struct RefreshCapsule: View {
                             : .default,
                         value: isRefreshing
                     )
-                Text(isRefreshing ? "同步中…" : "下拉刷新")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(HostTheme.muted)
             }
-            .frame(width: 132, height: 96)
-            .background(HostTheme.bg.opacity(0.65))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(HostTheme.muted.opacity(0.15), lineWidth: 1)
-            )
+            .buttonStyle(.plain)
+            .disabled(isRefreshing)
         }
-        .buttonStyle(.plain)
-        .disabled(isRefreshing)
+        .padding(.horizontal, 4)
+        .frame(height: 28)
     }
 }
 
