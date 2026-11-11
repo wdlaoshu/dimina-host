@@ -318,7 +318,16 @@ class HostCatalogController(
         get() = HostCatalogConfig.basicAuthValue(config.authUser, config.authPassword)
 
     private fun HttpURLConnection.applyAuth() {
-        authHeaderValue?.let { setRequestProperty("Authorization", it) }
+        val basic = authHeaderValue
+        if (basic != null) {
+            setRequestProperty("Authorization", basic)
+            return
+        }
+        // 方案 B：只填密钥、不填用户名时，用 X-Api-Key 请求头交给 Nginx 校验。
+        val key = config.authPassword.trim()
+        if (config.authUser.trim().isEmpty() && key.isNotEmpty()) {
+            setRequestProperty("X-Api-Key", key)
+        }
     }
 
     fun catalogUrl(): String? = buildCatalogUrl(config.source, config.channel)
@@ -741,7 +750,8 @@ class HostCatalogController(
         fun buildCatalogUrl(source: String, channel: String): String? {
             var text = source.trim()
             if (text.isEmpty()) return null
-            if (!text.lowercase(Locale.US).endsWith(".json")) {
+            val lower = text.lowercase(Locale.US)
+            if (!lower.endsWith(".json")) {
                 if (!text.endsWith("/")) text += "/"
                 text += "apps.json"
             }

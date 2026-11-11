@@ -2331,13 +2331,13 @@ private fun SettingsSheet(
         Spacer(Modifier.height(8.dp))
         SourceField(
             value = authUserDraft,
-            placeholder = "访问用户名（未启用可留空）",
+            placeholder = "用户名（仅 Basic 鉴权需要，可留空）",
             onValueChange = { authUserDraft = it },
         )
         Spacer(Modifier.height(8.dp))
         SourceField(
             value = authPasswordDraft,
-            placeholder = "访问密码",
+            placeholder = "访问密钥 / 密码",
             onValueChange = { authPasswordDraft = it },
         )
         Spacer(Modifier.height(10.dp))
@@ -2381,7 +2381,7 @@ private fun SettingsSheet(
             }
         }
         Text(
-            "地址支持直接填写 apps.json，或填写站点根路径自动补全 /apps.json。安装包与图标必须与应用源同域。若站点在宝塔开启了「密码访问」，填写对应的用户名和密码，目录、安装包、图标请求都会自动携带。",
+            "地址支持直接填写 apps.json，或填写站点根路径自动补全 /apps.json。安装包与图标必须与应用源同域。只填「访问密钥」时走 X-Api-Key 请求头（Nginx 密钥鉴权）；同时填用户名和密钥时走 HTTP Basic（宝塔「密码访问」）。",
             color = HostMuted,
             fontSize = 11.sp,
             lineHeight = 16.sp,

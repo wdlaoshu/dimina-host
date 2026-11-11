@@ -430,11 +430,20 @@ final class HostCatalogCenter: ObservableObject {
         return "Basic " + data.base64EncodedString()
     }
 
+    /// 方案 B：只填密钥、不填用户名时，用 X-Api-Key 请求头交给 Nginx 校验。
+    private var apiKeyValue: String? {
+        guard config.authUser.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let key = config.authPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        return key.isEmpty ? nil : key
+    }
+
     private func authorizedRequest(_ url: URL, timeout: TimeInterval) -> URLRequest {
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
         if let auth = authHeaderValue {
             request.setValue(auth, forHTTPHeaderField: "Authorization")
+        } else if let key = apiKeyValue {
+            request.setValue(key, forHTTPHeaderField: "X-Api-Key")
         }
         return request
     }

@@ -17,8 +17,8 @@ android {
         applicationId = "com.dreamtapir.host"
         minSdk = 26
         targetSdk = 35
-        versionCode = 44
-        versionName = "1.0.49"
+        versionCode = 45
+        versionName = "1.0.50"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
