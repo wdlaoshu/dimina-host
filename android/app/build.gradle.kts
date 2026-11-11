@@ -17,8 +17,8 @@ android {
         applicationId = "com.dreamtapir.host"
         minSdk = 26
         targetSdk = 35
-        versionCode = 35
-        versionName = "1.0.35"
+        versionCode = 36
+        versionName = "1.0.36"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
@@ -57,8 +57,6 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    // pullRefresh / PullRefreshIndicator 来自 material（Material 2），与 material3 共存。
-    implementation(libs.androidx.compose.material)
     implementation(libs.androidx.compose.material.icons.core)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

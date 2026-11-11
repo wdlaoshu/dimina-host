@@ -65,9 +65,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.pullrefresh.PullRefreshIndicator
-import androidx.compose.material.pullrefresh.pullRefresh
-import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -279,18 +276,6 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
     var gridWindowPos by remember { mutableStateOf(Offset.Zero) }
     var boxWindowPos by remember { mutableStateOf(Offset.Zero) }
     val gridState = rememberLazyGridState()
-    // 下拉刷新：配合 LazyVerticalGrid，手势从网格顶部下拉触发同步。
-    var refreshing by remember { mutableStateOf(false) }
-    val pullRefreshState = rememberPullRefreshState(
-        refreshing = refreshing,
-        onRefresh = {
-            refreshing = true
-            scope.launch {
-                syncNow(true)
-                refreshing = false
-            }
-        },
-    )
     val hostView = LocalView.current
 
     fun refreshRunning() {
@@ -619,14 +604,12 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                     OfflineBanner()
                 }
 
-                Box(modifier = Modifier.fillMaxSize()) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(if (catalog.config.listLayout) 1 else 3),
-                        state = gridState,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .pullRefresh(pullRefreshState)
-                            .padding(top = 4.dp)
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(if (catalog.config.listLayout) 1 else 3),
+                    state = gridState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 4.dp)
                             // 搜索框弹出键盘后，点列表空白处收起键盘，避免键盘一直压在首页上。
                             .pointerInput(Unit) {
                                 detectTapGestures(onTap = { focusManager.clearFocus() })
@@ -796,13 +779,6 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                         }
                     }
                 }
-                PullRefreshIndicator(
-                    refreshing = refreshing,
-                    state = pullRefreshState,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                    backgroundColor = HostSurface,
-                    contentColor = HostPrimary,
-                )
             }
 
             if (importing) {
@@ -1018,7 +994,6 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
     }
     }
     }
-}
 }
 
 // MARK: - Hub
