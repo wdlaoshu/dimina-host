@@ -17,6 +17,10 @@ struct ContentView: View {
     @State private var searchText = ""
     @FocusState private var searchFocused: Bool
     @State private var filter: HostFilter = .all
+    @State private var showNewGroupAlert = false
+    @State private var newGroupName = ""
+    @State private var renamingGroup: HostGroup?
+    @State private var renameText = ""
     // 首页展示方式：三列图标网格 / 单列信息列表，记住上次选择。
     @AppStorage("host.home.listLayout") private var listLayout = false
     @State private var selectedItem: HostHubItem?
@@ -123,6 +127,11 @@ struct ContentView: View {
             HostAppDetailSheet(
                 item: item,
                 catalog: catalog,
+                groups: store.groups,
+                currentGroupId: store.groupId(for: item.appId),
+                onAssignGroup: { groupId in
+                    store.assign(item.appId, to: groupId)
+                },
                 onOpen: {
                     selectedItem = nil
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
@@ -140,6 +149,29 @@ struct ContentView: View {
                 },
                 onToast: { showToast($0) }
             )
+        }
+        .alert("新建分组", isPresented: $showNewGroupAlert) {
+            TextField("分组名称", text: $newGroupName)
+            Button("创建") {
+                let group = store.addGroup(named: newGroupName)
+                withAnimation(.easeOut(duration: 0.18)) { filter = .group(group.id) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("分组只保存在本机，可随时重命名或删除。")
+        }
+        .alert("重命名分组", isPresented: Binding(
+            get: { renamingGroup != nil },
+            set: { if !$0 { renamingGroup = nil } }
+        )) {
+            TextField("分组名称", text: $renameText)
+            Button("保存") {
+                if let group = renamingGroup {
+                    store.renameGroup(group.id, to: renameText)
+                }
+                renamingGroup = nil
+            }
+            Button("取消", role: .cancel) { renamingGroup = nil }
         }
         .sheet(isPresented: $showSettings) {
             HostSettingsSheet(
@@ -345,28 +377,50 @@ struct ContentView: View {
 
     private var filterRow: some View {
         HStack(spacing: 8) {
-            ForEach(HostFilter.allCases) { item in
-                let count = count(for: item)
-                Button {
-                    withAnimation(.easeOut(duration: 0.18)) { filter = item }
-                } label: {
-                    HStack(spacing: 5) {
-                        Text(item.title)
-                        if count > 0 {
-                            Text("\(count)")
-                                .font(.system(size: 10, weight: .semibold))
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(HostFilter.builtins) { item in
+                        filterChip(item, title: item.title, count: count(for: item))
+                    }
+
+                    ForEach(store.groups) { group in
+                        filterChip(
+                            .group(group.id),
+                            title: group.name,
+                            count: count(for: .group(group.id))
+                        )
+                        .contextMenu {
+                            Button {
+                                renameText = group.name
+                                renamingGroup = group
+                            } label: {
+                                Label("重命名", systemImage: "pencil")
+                            }
+                            Button(role: .destructive) {
+                                if filter == .group(group.id) { filter = .all }
+                                store.deleteGroup(group.id)
+                            } label: {
+                                Label("删除分组", systemImage: "trash")
+                            }
                         }
                     }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(filter == item ? HostTheme.surface : HostTheme.muted)
-                    .padding(.horizontal, 12)
-                    .frame(height: 32)
-                    .background(filter == item ? HostTheme.text : HostTheme.surface)
-                    .clipShape(Capsule())
+
+                    // 新建分组
+                    Button {
+                        newGroupName = ""
+                        showNewGroupAlert = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(HostTheme.muted)
+                            .frame(width: 32, height: 32)
+                            .background(HostTheme.surface)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("新建分组")
                 }
-                .buttonStyle(.plain)
             }
-            Spacer(minLength: 0)
 
             // 切换网格/单列：图标展示的是「点完会变成的布局」。
             Button {
@@ -386,6 +440,28 @@ struct ContentView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 4)
+    }
+
+    private func filterChip(_ item: HostFilter, title: String, count: Int) -> some View {
+        let selected = filter == item
+        return Button {
+            withAnimation(.easeOut(duration: 0.18)) { filter = item }
+        } label: {
+            HStack(spacing: 5) {
+                Text(title)
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(selected ? HostTheme.surface : HostTheme.muted)
+            .padding(.horizontal, 12)
+            .frame(height: 32)
+            .background(selected ? HostTheme.text : HostTheme.surface)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private var offlineBanner: some View {
@@ -1267,6 +1343,8 @@ struct ContentView: View {
             items = hubItems
         case .updates:
             items = updatableItems
+        case .group(let groupId):
+            items = hubItems.filter { store.groupId(for: $0.appId) == groupId }
         }
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return items }
@@ -1281,6 +1359,8 @@ struct ContentView: View {
         case .recent: return store.recentIds.count
         case .all: return hubItems.count
         case .updates: return updatableItems.count
+        case .group(let groupId):
+            return hubItems.filter { store.groupId(for: $0.appId) == groupId }.count
         }
     }
 
@@ -1472,20 +1552,32 @@ struct ContentView: View {
 
 // MARK: - Filters
 
-enum HostFilter: String, CaseIterable, Identifiable {
+enum HostFilter: Hashable, Identifiable {
     case recent
     case all
     case updates
+    case group(String)
 
-    var id: String { rawValue }
+    var id: String {
+        switch self {
+        case .recent: return "recent"
+        case .all: return "all"
+        case .updates: return "updates"
+        case .group(let id): return "group-\(id)"
+        }
+    }
 
     var title: String {
         switch self {
         case .recent: return "最近使用"
-        case .all: return "全部"
-        case .updates: return "可更新"
+        case .all: return "全部程序"
+        case .updates: return "更新程序"
+        case .group: return ""
         }
     }
+
+    /// 三个内置筛选，自建分组追加在后面。
+    static let builtins: [HostFilter] = [.recent, .all, .updates]
 }
 
 // MARK: - Detail sheet
@@ -1493,6 +1585,9 @@ enum HostFilter: String, CaseIterable, Identifiable {
 private struct HostAppDetailSheet: View {
     let item: HostHubItem
     @ObservedObject var catalog: HostCatalogCenter
+    let groups: [HostGroup]
+    let currentGroupId: String?
+    let onAssignGroup: (String?) -> Void
     let onOpen: () -> Void
     let onInstall: (HostRemoteApp) async -> Void
     let onUninstall: (HostApp, Bool) async -> Void
@@ -1513,6 +1608,59 @@ private struct HostAppDetailSheet: View {
     private var hostTooLow: Bool {
         guard let minimumHost else { return false }
         return HostCatalogCenter.compareVersion(catalog.hostVersion, minimumHost) < 0
+    }
+
+    /// 分组归属：未分组 / 已有分组单选，点击即移动。
+    private var groupPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("分组")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(HostTheme.text)
+                Spacer()
+                if groups.isEmpty {
+                    Text("可在首页 + 新建分组")
+                        .font(.system(size: 11))
+                        .foregroundColor(HostTheme.muted)
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    groupOption(title: "未分组", selected: currentGroupId == nil) {
+                        onAssignGroup(nil)
+                    }
+                    ForEach(groups) { group in
+                        groupOption(title: group.name, selected: currentGroupId == group.id) {
+                            onAssignGroup(group.id)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(HostTheme.bg)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func groupOption(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                Text(title)
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(selected ? HostTheme.surface : HostTheme.muted)
+            .padding(.horizontal, 12)
+            .frame(height: 30)
+            .background(selected ? HostTheme.text : HostTheme.surface)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     var body: some View {
@@ -1540,6 +1688,8 @@ private struct HostAppDetailSheet: View {
                 .padding(14)
                 .background(HostTheme.bg)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                groupPicker
 
                 if let notes = item.remote?.notes, !notes.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {

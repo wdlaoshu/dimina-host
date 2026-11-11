@@ -75,6 +75,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -249,6 +251,10 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
     var recentIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(HostFilter.All) }
+    // 自定义分组：选中分组时优先于内置筛选，不塞进 HostFilter 枚举，避免影响 entries 与 when 穷举。
+    var groups by remember { mutableStateOf(HostGroups.loadGroups(context)) }
+    var assignments by remember { mutableStateOf(HostGroups.loadAssignments(context)) }
+    var selectedGroupId by remember { mutableStateOf<String?>(null) }
     var selectedItem by remember { mutableStateOf<HostHubItem?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showUpdates by remember { mutableStateOf(false) }
@@ -291,6 +297,41 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
 
     fun showMessage(message: String) {
         scope.launch { snackbar.showSnackbar(message) }
+    }
+
+    // 分组的所有变更都立即写回 SharedPreferences，重启后保持。
+    fun saveGroups(next: List<HostGroup>) {
+        groups = next
+        HostGroups.saveGroups(context, next)
+    }
+
+    fun saveAssignments(next: Map<String, String>) {
+        assignments = next
+        HostGroups.saveAssignments(context, next)
+    }
+
+    fun createGroup(name: String) {
+        val id = "g" + System.currentTimeMillis().toString(36)
+        saveGroups(groups + HostGroup(id, name.trim().ifBlank { "新分组" }))
+    }
+
+    fun renameGroup(id: String, name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        saveGroups(groups.map { if (it.id == id) it.copy(name = trimmed) else it })
+    }
+
+    fun deleteGroup(id: String) {
+        saveGroups(groups.filterNot { it.id == id })
+        saveAssignments(assignments.filterValues { it != id })
+        if (selectedGroupId == id) {
+            selectedGroupId = null
+            filter = HostFilter.All
+        }
+    }
+
+    fun assignGroup(appId: String, groupId: String?) {
+        saveAssignments(if (groupId == null) assignments - appId else assignments + (appId to groupId))
     }
 
     fun openApp(app: HostApp) {
@@ -402,12 +443,18 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
     val recentHub = remember(hub, recentIds) {
         recentIds.mapNotNull { id -> hub.firstOrNull { it.appId == id } }
     }
-    val visible = remember(filter, query, hub, updates, recentHub) {
-        val base = when (filter) {
-            HostFilter.Recent -> recentHub
-            HostFilter.All -> hub
-            HostFilter.Updates -> updates
-        }
+    // 各分组的成员数，用于 chip 上的角标。
+    val groupCounts = remember(hub, groups, assignments) {
+        groups.associate { group -> group.id to hub.count { assignments[it.appId] == group.id } }
+    }
+    val visible = remember(filter, query, hub, updates, recentHub, selectedGroupId, assignments) {
+        val base = selectedGroupId
+            ?.let { gid -> hub.filter { assignments[it.appId] == gid } }
+            ?: when (filter) {
+                HostFilter.Recent -> recentHub
+                HostFilter.All -> hub
+                HostFilter.Updates -> updates
+            }
         if (query.isBlank()) {
             base
         } else {
@@ -593,8 +640,18 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                     recentCount = recentIds.size,
                     allCount = hub.size,
                     updateCount = updates.size,
+                    groups = groups,
+                    groupCounts = groupCounts,
+                    selectedGroupId = selectedGroupId,
                     listLayout = catalog.config.listLayout,
-                    onSelect = { filter = it },
+                    onSelect = {
+                        filter = it
+                        selectedGroupId = null
+                    },
+                    onSelectGroup = { id -> selectedGroupId = id },
+                    onCreateGroup = { createGroup(it) },
+                    onRenameGroup = { id, name -> renameGroup(id, name) },
+                    onDeleteGroup = { deleteGroup(it) },
                     onToggleLayout = {
                         catalog.updateConfig { it.copy(listLayout = !it.listLayout) }
                     },
@@ -658,6 +715,7 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
                             EmptyState(
                                 query = query,
                                 filter = filter,
+                                groupSelected = selectedGroupId != null,
                                 hasRemote = catalog.remoteApps.isNotEmpty(),
                                 hasLocal = apps.isNotEmpty(),
                                 installableCount = installable.size,
@@ -832,6 +890,9 @@ fun HostShellScreen(modifier: Modifier = Modifier) {
             AppDetailSheet(
                 item = item,
                 catalog = catalog,
+                groups = groups,
+                groupId = assignments[item.appId]?.takeIf { gid -> groups.any { it.id == gid } },
+                onAssignGroup = { gid -> assignGroup(item.appId, gid) },
                 onOpen = {
                     val local = item.local
                     selectedItem = null
@@ -1016,8 +1077,56 @@ private fun buildHub(local: List<HostApp>, remote: List<HostRemoteApp>): List<Ho
 
 enum class HostFilter(val title: String) {
     Recent("最近使用"),
-    All("全部"),
-    Updates("可更新"),
+    All("全部程序"),
+    Updates("更新程序"),
+}
+
+/** 用户自建的分组，成员关系见 [HostGroups] 里的 appId → groupId。 */
+data class HostGroup(val id: String, val name: String)
+
+/** 自定义分组与分组成员的持久化，沿用宿主的 SharedPreferences，不引入额外依赖。 */
+object HostGroups {
+    private const val PREFS = "dimina_host_shell"
+    private const val KEY_GROUPS = "dimina.host.groups"
+    private const val KEY_ASSIGNMENTS = "dimina.host.groupAssignments"
+    private const val FIELD = '\u0001'
+    private const val ROW = '|'
+
+    fun loadGroups(context: Context): List<HostGroup> =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_GROUPS, "").orEmpty()
+            .split(ROW)
+            .mapNotNull { row ->
+                val parts = row.split(FIELD, limit = 2)
+                if (parts.size == 2 && parts[0].isNotBlank()) HostGroup(parts[0], parts[1]) else null
+            }
+
+    fun saveGroups(context: Context, groups: List<HostGroup>) {
+        val value = groups.joinToString(ROW.toString()) { group ->
+            group.id.replace(ROW, ' ') + FIELD + group.name.replace(FIELD, ' ').replace(ROW, ' ')
+        }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_GROUPS, value)
+            .apply()
+    }
+
+    fun loadAssignments(context: Context): Map<String, String> =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getStringSet(KEY_ASSIGNMENTS, emptySet()).orEmpty()
+            .mapNotNull { entry ->
+                val parts = entry.split(FIELD, limit = 2)
+                if (parts.size == 2 && parts[0].isNotBlank()) parts[0] to parts[1] else null
+            }
+            .toMap()
+
+    fun saveAssignments(context: Context, assignments: Map<String, String>) {
+        val value = assignments.map { (appId, groupId) -> appId + FIELD + groupId }.toSet()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putStringSet(KEY_ASSIGNMENTS, value)
+            .apply()
+    }
 }
 
 private fun timeText(millis: Long): String =
@@ -1146,51 +1255,246 @@ private fun FilterRow(
     recentCount: Int,
     allCount: Int,
     updateCount: Int,
+    groups: List<HostGroup>,
+    groupCounts: Map<String, Int>,
+    selectedGroupId: String?,
     listLayout: Boolean,
     onSelect: (HostFilter) -> Unit,
+    onSelectGroup: (String) -> Unit,
+    onCreateGroup: (String) -> Unit,
+    onRenameGroup: (String, String) -> Unit,
+    onDeleteGroup: (String) -> Unit,
     onToggleLayout: () -> Unit,
 ) {
+    var showCreate by remember { mutableStateOf(false) }
+    var nameDraft by remember { mutableStateOf("") }
+    var menuTarget by remember { mutableStateOf<HostGroup?>(null) }
+    var renameTarget by remember { mutableStateOf<HostGroup?>(null) }
+    var deleteTarget by remember { mutableStateOf<HostGroup?>(null) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        HostFilter.entries.forEach { item ->
-            val count = when (item) {
-                HostFilter.Recent -> recentCount
-                HostFilter.All -> allCount
-                HostFilter.Updates -> updateCount
-            }
-            val selected = filter == item
-            Row(
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(if (selected) HostText else HostSurface)
-                    .combinedClickable(onClick = { onSelect(item) }, onLongClick = { onSelect(item) })
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
+        LazyRow(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            rowItems(HostFilter.entries, key = { it.name }) { item ->
+                val count = when (item) {
+                    HostFilter.Recent -> recentCount
+                    HostFilter.All -> allCount
+                    HostFilter.Updates -> updateCount
+                }
+                HostFilterChip(
                     text = item.title,
-                    color = if (selected) HostSurface else HostMuted,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
+                    count = count,
+                    selected = selectedGroupId == null && filter == item,
+                    onClick = { onSelect(item) },
                 )
-                if (count > 0) {
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = "$count",
-                        color = if (selected) HostSurface.copy(alpha = 0.75f) else HostMuted,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
+            }
+            rowItems(groups, key = { it.id }) { group ->
+                HostFilterChip(
+                    text = group.name,
+                    count = groupCounts[group.id] ?: 0,
+                    selected = selectedGroupId == group.id,
+                    onClick = { onSelectGroup(group.id) },
+                    onLongClick = { menuTarget = group },
+                )
+            }
+            item(key = "+") {
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(HostSurface)
+                        .clickable {
+                            nameDraft = ""
+                            showCreate = true
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "新建分组",
+                        tint = HostMuted,
+                        modifier = Modifier.size(15.dp),
                     )
                 }
             }
         }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.width(8.dp))
         LayoutToggle(listLayout = listLayout, onToggle = onToggleLayout)
+    }
+
+    if (showCreate) {
+        GroupNameDialog(
+            title = "新建分组",
+            draft = nameDraft,
+            onDraftChange = { nameDraft = it },
+            onConfirm = {
+                onCreateGroup(nameDraft)
+                nameDraft = ""
+                showCreate = false
+            },
+            onDismiss = {
+                nameDraft = ""
+                showCreate = false
+            },
+        )
+    }
+
+    renameTarget?.let { target ->
+        GroupNameDialog(
+            title = "重命名分组",
+            draft = nameDraft,
+            onDraftChange = { nameDraft = it },
+            onConfirm = {
+                onRenameGroup(target.id, nameDraft)
+                nameDraft = ""
+                renameTarget = null
+            },
+            onDismiss = {
+                nameDraft = ""
+                renameTarget = null
+            },
+        )
+    }
+
+    menuTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { menuTarget = null },
+            title = { Text(target.name) },
+            text = {
+                Column {
+                    TextButton(onClick = {
+                        nameDraft = target.name
+                        renameTarget = target
+                        menuTarget = null
+                    }) { Text("重命名", color = HostText) }
+                    TextButton(onClick = {
+                        deleteTarget = target
+                        menuTarget = null
+                    }) { Text("删除分组", color = HostRed) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { menuTarget = null }) { Text("取消", color = HostMuted) }
+            },
+            containerColor = HostSurface,
+        )
+    }
+
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("删除分组「${target.name}」？") },
+            text = { Text("分组内的小程序不会被卸载，会回到未分组。", color = HostMuted) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDeleteGroup(target.id)
+                    deleteTarget = null
+                }) { Text("删除", color = HostRed) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("取消", color = HostMuted) }
+            },
+            containerColor = HostSurface,
+        )
+    }
+}
+
+/** 筛选行里的胶囊 chip；点选切换筛选，长按（分组 chip）打开管理菜单。 */
+@Composable
+private fun HostFilterChip(
+    text: String,
+    count: Int,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(if (selected) HostText else HostSurface)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick ?: onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            color = if (selected) HostSurface else HostMuted,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        if (count > 0) {
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = "$count",
+                color = if (selected) HostSurface.copy(alpha = 0.75f) else HostMuted,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+/** 分组名称的输入弹窗，新建与重命名共用。 */
+@Composable
+private fun GroupNameDialog(
+    title: String,
+    draft: String,
+    onDraftChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = onDraftChange,
+                placeholder = { Text("分组名称", color = HostMuted) },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = HostPrimary,
+                    unfocusedBorderColor = HostLine,
+                    focusedTextColor = HostText,
+                    unfocusedTextColor = HostText,
+                    cursorColor = HostPrimary,
+                ),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("确定", color = HostPrimary) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消", color = HostMuted) }
+        },
+        containerColor = HostSurface,
+    )
+}
+
+/** 详情页里的分组选择 chip。 */
+@Composable
+private fun GroupChip(name: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(if (selected) HostText else HostBg)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = name,
+            color = if (selected) HostSurface else HostMuted,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 
@@ -1813,6 +2117,7 @@ private fun AppIcon(
 private fun EmptyState(
     query: String,
     filter: HostFilter,
+    groupSelected: Boolean,
     hasRemote: Boolean,
     hasLocal: Boolean,
     installableCount: Int,
@@ -1823,12 +2128,14 @@ private fun EmptyState(
 ) {
     val title = when {
         query.isNotBlank() -> "没有匹配的小程序"
+        groupSelected -> "该分组暂无小程序"
         filter == HostFilter.Updates -> "全部应用已是最新"
         hasRemote && !hasLocal -> "远程目录有应用可安装"
         else -> "还没有小程序"
     }
     val detail = when {
         query.isNotBlank() -> "换个关键词试试"
+        groupSelected -> "在应用详情里选择「分组」即可加入"
         filter == HostFilter.Updates -> "有新版本时会在这里出现"
         hasRemote && !hasLocal -> "点击全部安装，或进入设置检查应用源"
         !sourceConfigured -> "先配置 apps.json 地址，再拉取应用目录"
@@ -1861,7 +2168,7 @@ private fun EmptyState(
             modifier = Modifier.padding(top = 4.dp),
         )
 
-        if (hasRemote && !hasLocal && query.isBlank() && installableCount > 0) {
+        if (hasRemote && !hasLocal && query.isBlank() && !groupSelected && installableCount > 0) {
             Button(
                 onClick = onInstallAll,
                 modifier = Modifier.padding(top = 14.dp),
@@ -1919,6 +2226,9 @@ private fun ImportingOverlay() {
 private fun AppDetailSheet(
     item: HostHubItem,
     catalog: HostCatalogController,
+    groups: List<HostGroup>,
+    groupId: String?,
+    onAssignGroup: (String?) -> Unit,
     onOpen: () -> Unit,
     onInstall: () -> Unit,
     onCheckUpdate: () -> Unit,
@@ -1971,6 +2281,47 @@ private fun AppDetailSheet(
                     remote.minHostVersion?.let { DetailRow("最低宿主", it) }
                 }
                 DetailRow("来源", item.local?.sourceLabel ?: "远程目录")
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(HostBg)
+                .padding(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("分组", color = HostText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = groups.firstOrNull { it.id == groupId }?.name ?: "未分组",
+                    color = HostMuted,
+                    fontSize = 11.sp,
+                )
+            }
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item {
+                    GroupChip(
+                        name = "未分组",
+                        selected = groupId == null,
+                        onClick = { onAssignGroup(null) },
+                    )
+                }
+                rowItems(groups, key = { it.id }) { group ->
+                    GroupChip(
+                        name = group.name,
+                        selected = groupId == group.id,
+                        onClick = { onAssignGroup(group.id) },
+                    )
+                }
             }
         }
 

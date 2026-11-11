@@ -125,19 +125,91 @@ struct HostImportPackage: Identifiable {
     let fileURL: URL
 }
 
+/// 用户自建的小程序分组。
+struct HostGroup: Identifiable, Codable, Hashable {
+    let id: String
+    var name: String
+}
+
 @MainActor
 final class HostStore: ObservableObject {
     @Published private(set) var apps: [HostApp] = []
     @Published private(set) var recentIds: [String] = []
     /// 每个小程序最近一次使用时间，切换器与「最近使用」用它显示「刚刚 / N 分钟前」。
     @Published private(set) var recentTimes: [String: TimeInterval] = [:]
+    /// 用户自建的分组
+    @Published private(set) var groups: [HostGroup] = []
+    /// appId → groupId 的归属映射
+    @Published private(set) var groupAssignments: [String: String] = [:]
 
     private let recentKey = "dimina.host.recentAppIds"
     private let recentTimeKey = "dimina.host.recentTimes"
+    private let groupsKey = "dimina.host.groups"
+    private let groupMapKey = "dimina.host.groupAssignments"
     private let maxRecent = 8
 
     init() {
+        loadGroups()
         reload()
+    }
+
+    // MARK: - Groups
+
+    private func loadGroups() {
+        if let data = UserDefaults.standard.data(forKey: groupsKey),
+           let decoded = try? JSONDecoder().decode([HostGroup].self, from: data) {
+            groups = decoded
+        }
+        let map = UserDefaults.standard.dictionary(forKey: groupMapKey) as? [String: String] ?? [:]
+        let valid = Set(groups.map(\.id))
+        groupAssignments = map.filter { valid.contains($0.value) }
+    }
+
+    private func persistGroups() {
+        if let data = try? JSONEncoder().encode(groups) {
+            UserDefaults.standard.set(data, forKey: groupsKey)
+        }
+        UserDefaults.standard.set(groupAssignments, forKey: groupMapKey)
+    }
+
+    @discardableResult
+    func addGroup(named name: String) -> HostGroup {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let group = HostGroup(id: UUID().uuidString, name: trimmed.isEmpty ? "新分组" : trimmed)
+        groups.append(group)
+        persistGroups()
+        return group
+    }
+
+    func renameGroup(_ id: String, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        groups[index].name = trimmed
+        persistGroups()
+    }
+
+    func deleteGroup(_ id: String) {
+        groups.removeAll { $0.id == id }
+        groupAssignments = groupAssignments.filter { $0.value != id }
+        persistGroups()
+    }
+
+    func assign(_ appId: String, to groupId: String?) {
+        if let groupId {
+            groupAssignments[appId] = groupId
+        } else {
+            groupAssignments.removeValue(forKey: appId)
+        }
+        UserDefaults.standard.set(groupAssignments, forKey: groupMapKey)
+    }
+
+    func groupId(for appId: String) -> String? {
+        groupAssignments[appId]
+    }
+
+    func memberIds(of groupId: String) -> Set<String> {
+        Set(groupAssignments.filter { $0.value == groupId }.map(\.key))
     }
 
     var recentApps: [HostApp] {
