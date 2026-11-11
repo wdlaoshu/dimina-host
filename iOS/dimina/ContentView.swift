@@ -405,6 +405,8 @@ struct ContentView: View {
 
     @ViewBuilder
     private var content: some View {
+        // 单一滚动容器：外层一个 ScrollView，内部不用嵌套 LazyVGrid / LazyColumn。
+        // SwiftUI 嵌套滚动视图会出现手势竞争，导致下拉刷新偶发被内层吃掉。
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if !runningIds.isEmpty {
@@ -428,15 +430,25 @@ struct ContentView: View {
                         }
                     }
                 } else {
-                    LazyVGrid(
-                        columns: Array(
-                            repeating: GridItem(.flexible(), spacing: 12),
-                            count: 3
-                        ),
-                        spacing: 12
-                    ) {
-                        ForEach(visibleItems) { item in
-                            appCard(item)
+                    // 非懒加载网格：首页小程序数量一般是几十个以内，用 Grid 排足够流畅。
+                    Grid(horizontalSpacing: 12, verticalSpacing: 12) {
+                        ForEach(Array(visibleItems.enumerated()), id: \.element.appId) { idx, item in
+                            if idx % 3 == 0 {
+                                GridRow {
+                                    appCard(item)
+                                    // 同一行缺的补占位，否则 Grid 会把卡片拉宽。
+                                    if idx + 1 < visibleItems.count {
+                                        appCard(visibleItems[idx + 1])
+                                    } else {
+                                        Color.clear.frame(height: 116)
+                                    }
+                                    if idx + 2 < visibleItems.count {
+                                        appCard(visibleItems[idx + 2])
+                                    } else {
+                                        Color.clear.frame(height: 116)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -457,12 +469,12 @@ struct ContentView: View {
         // 搜索框弹出键盘后，点列表空白处或拖动列表都要能收起键盘，
         // 否则键盘会一直压在首页上。
         .scrollDismissesKeyboard(.immediately)
-        .simultaneousGesture(
-            TapGesture().onEnded { searchFocused = false }
-        )
+        // 下拉刷新挂在 ScrollView 上；单一滚动容器不会再有内层抢手势的问题。
         .refreshable {
             await sync(force: true)
         }
+        // 点内容空白处收起键盘，不再用 simultaneousGesture——它会干扰 refreshable 的手势识别。
+        .onTapGesture { searchFocused = false }
     }
 
     private var updateBar: some View {
